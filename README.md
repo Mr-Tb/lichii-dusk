@@ -44,7 +44,7 @@ The emulator is mostly CPU-bound in this game, so a faster CPU helps more than a
 
 ## Download
 
-**[Download the latest release (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/Lichii/releases/latest)**
+**[Download the latest release (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/latest)**
 
 ## Installation
 
@@ -94,7 +94,7 @@ The first minutes stutter while shaders compile; this improves with each session
 
 ## Building from source
 
-Branch [`dusk-frizti`](https://github.com/Mr-Tb/Lichii/tree/dusk-frizti). Build with MSYS2 UCRT64 + clang, exactly as upstream Lichii.
+Branch [`dusk-frizti`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-frizti). Build with MSYS2 UCRT64 + clang, exactly as upstream Lichii.
 
 ## Credits and license
 

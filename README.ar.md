@@ -38,7 +38,7 @@
 
 ## التحميل
 
-**[حمّل أحدث إصدار (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/Lichii/releases/latest)**
+**[حمّل أحدث إصدار (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/latest)**
 
 ## التثبيت
 
@@ -95,7 +95,7 @@
 
 ## البناء من الكود المصدري
 
-الفرع [`dusk-frizti`](https://github.com/Mr-Tb/Lichii/tree/dusk-frizti). يُبنى باستخدام MSYS2 UCRT64 + clang مثل Lichii الأصلي تمامًا.
+الفرع [`dusk-frizti`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-frizti). يُبنى باستخدام MSYS2 UCRT64 + clang مثل Lichii الأصلي تمامًا.
 
 ## الشكر والترخيص
 
