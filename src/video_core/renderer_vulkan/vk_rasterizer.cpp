@@ -634,7 +634,7 @@ void TraceWindowTarget(const Tegra::Engines::Maxwell3D& maxwell3d, Tegra::Memory
     }();
     const u64 pixel_shader =
         (u64{regs.pipelines[5].reserved[0] & 0xff} << 32) | regs.pipelines[5].reserved[1];
-    if (!trace || kind[0] != 'd' || regs.rt[0].width < 1920 || traced >= 400 || seen_events++ < skip ||
+    if (!trace || regs.rt[0].width != 3840 || traced >= 400 || seen_events++ < skip ||
         (only_ps != 0 && pixel_shader != only_ps)) {
         return;
     }
@@ -1217,21 +1217,6 @@ void RasterizerVulkan::Clear(u32 layer_count) {
     const u32 base_array_layer = regs.clear_surface.layer;
     const auto clear_layers =
         GetFramebufferClearLayers(base_array_layer, layer_count, framebuffer->Layers());
-    // EDEN_NX2_CLEAR_TRACE=1: log colour clears of layered/3D targets (rt0 depth > 1).
-    if (static const bool clear_trace = std::getenv("EDEN_NX2_CLEAR_TRACE") != nullptr;
-        clear_trace && regs.rt[0].depth > 1) {
-        static u32 traced{};
-        if (traced < 400) {
-            ++traced;
-            LOG_INFO(Render_Vulkan,
-                     "clear trace: rt0={:#x} rt0_depth={} layer={} requested={} framebuffer_layers={} "
-                     "clipped={} color_mask={}{}{}{} depth={} stencil={}",
-                     regs.rt[0].Address(), regs.rt[0].depth.Value(), base_array_layer, layer_count,
-                     framebuffer->Layers(), clear_layers.count, regs.clear_surface.R.Value(),
-                     regs.clear_surface.G.Value(), regs.clear_surface.B.Value(),
-                     regs.clear_surface.A.Value(), use_depth, use_stencil);
-        }
-    }
     if (clear_layers.count != layer_count) {
         LOG_DEBUG(Render_Vulkan,
                   "Framebuffer clear layers: base={}, requested={}, clipped={}, framebuffer={}",
@@ -1461,26 +1446,6 @@ void RasterizerVulkan::Clear(u32 layer_count) {
         // scratch arena (1536x1408 RGBA16F at 0x819aaa0000) this way and relies on it for the
         // tensors' padding rows; stale rows kept NaN alive and whitened the bottom of the image.
         static constexpr std::array<f32, 4> zero_color{};
-        if (static const bool arena_trace = std::getenv("EDEN_NX2_ARENA_TRACE") != nullptr;
-            arena_trace) {
-            const auto [img, base] = texture_cache.ColorTargetImage(color_attachment);
-            if (img != nullptr && img->info.size.width == 1536) {
-                LOG_WARNING(Render_Vulkan,
-                            "Arena trace: addr={:#x} full={} signed={} covers={} layers_all={} "
-                            "rescaling={} zero={} levels={} layers={} depth={} area={}x{} img={}x{} "
-                            "rect=({},{} {}x{}) scissor={} bytes={:#x} view_base={}",
-                            img->gpu_addr, color_full_channels, is_signed, clear_covers_render_area,
-                            clear_layers.covers_all_layers, texture_cache.IsRescaling(),
-                            std::memcmp(regs.clear_color.data(), zero_color.data(),
-                                        sizeof(zero_color)) == 0,
-                            img->info.resources.levels, img->info.resources.layers,
-                            img->info.size.depth, render_area.width, render_area.height,
-                            img->info.size.width, img->info.size.height, clear_rect.rect.offset.x,
-                            clear_rect.rect.offset.y, clear_rect.rect.extent.width,
-                            clear_rect.rect.extent.height, regs.clear_control.use_scissor.Value(),
-                            img->guest_size_bytes, base);
-            }
-        }
         if (color_full_channels && !is_signed && clear_covers_render_area &&
             clear_layers.covers_all_layers &&
             std::memcmp(regs.clear_color.data(), zero_color.data(), sizeof(zero_color)) == 0) {
@@ -1490,12 +1455,7 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                 render_area.width >= ((image->info.size.width * up_scale) >> down_shift) &&
                 render_area.height >= ((image->info.size.height * up_scale) >> down_shift)) {
                 std::scoped_lock buffer_lock{buffer_cache.mutex};
-                const bool cleared = buffer_cache.DMAClear(
-                    image->gpu_addr, image->guest_size_bytes / sizeof(u32), 0);
-                if (std::getenv("EDEN_NX2_ARENA_TRACE") != nullptr && image->info.size.width == 1536) {
-                    LOG_WARNING(Render_Vulkan, "Arena trace: DMAClear {:#x} -> {}", image->gpu_addr,
-                                cleared);
-                }
+                buffer_cache.DMAClear(image->gpu_addr, image->guest_size_bytes / sizeof(u32), 0);
             }
         }
     }
