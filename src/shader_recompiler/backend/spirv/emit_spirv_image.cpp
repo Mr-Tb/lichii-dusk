@@ -4,6 +4,8 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
+
 #include <boost/container/static_vector.hpp>
 
 #include "common/settings.h"
@@ -755,6 +757,16 @@ void EmitImageWrite(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id
     const auto [image, is_integer] = Image(ctx, index, info);
     if (!is_integer) {
         color = ctx.OpBitcast(ctx.F32[4], color);
+        // EDEN_NX2_IMAGE_NAN_ZERO=1 (experiment): store NaN as 0 so one bad texel cannot persist
+        // in a temporal volume (Duskbloods fog history).
+        static const bool nan_zero = [] {
+            const char* value = std::getenv("EDEN_NX2_IMAGE_NAN_ZERO");
+            return value != nullptr && value[0] == '1';
+        }();
+        if (nan_zero) {
+            const Id is_nan{ctx.OpIsNan(ctx.TypeVector(ctx.U1, 4), color)};
+            color = ctx.OpSelect(ctx.F32[4], is_nan, ctx.ConstantNull(ctx.F32[4]), color);
+        }
     }
     ctx.OpImageWrite(image, coords, color);
 }

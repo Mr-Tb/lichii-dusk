@@ -634,7 +634,7 @@ void TraceWindowTarget(const Tegra::Engines::Maxwell3D& maxwell3d, Tegra::Memory
     }();
     const u64 pixel_shader =
         (u64{regs.pipelines[5].reserved[0] & 0xff} << 32) | regs.pipelines[5].reserved[1];
-    if (!trace || regs.rt[0].width != 3840 || traced >= 400 || seen_events++ < skip ||
+    if (!trace || kind[0] != 'd' || regs.rt[0].width < 1920 || traced >= 400 || seen_events++ < skip ||
         (only_ps != 0 && pixel_shader != only_ps)) {
         return;
     }
@@ -1217,10 +1217,99 @@ void RasterizerVulkan::Clear(u32 layer_count) {
     const u32 base_array_layer = regs.clear_surface.layer;
     const auto clear_layers =
         GetFramebufferClearLayers(base_array_layer, layer_count, framebuffer->Layers());
+    // EDEN_NX2_CLEAR_TRACE=1: log colour clears of layered/3D targets (rt0 depth > 1).
+    if (static const bool clear_trace = std::getenv("EDEN_NX2_CLEAR_TRACE") != nullptr;
+        clear_trace && regs.rt[0].depth > 1) {
+        static u32 traced{};
+        if (traced < 400) {
+            ++traced;
+            LOG_INFO(Render_Vulkan,
+                     "clear trace: rt0={:#x} rt0_depth={} layer={} requested={} framebuffer_layers={} "
+                     "clipped={} color_mask={}{}{}{} depth={} stencil={}",
+                     regs.rt[0].Address(), regs.rt[0].depth.Value(), base_array_layer, layer_count,
+                     framebuffer->Layers(), clear_layers.count, regs.clear_surface.R.Value(),
+                     regs.clear_surface.G.Value(), regs.clear_surface.B.Value(),
+                     regs.clear_surface.A.Value(), use_depth, use_stencil);
+        }
+    }
     if (clear_layers.count != layer_count) {
         LOG_DEBUG(Render_Vulkan,
                   "Framebuffer clear layers: base={}, requested={}, clipped={}, framebuffer={}",
                   base_array_layer, layer_count, clear_layers.count, framebuffer->Layers());
+    }
+    // Layers the framebuffer cannot reach (another attachment has fewer layers, or the target is a
+    // 3D image bound as a layered target) are cleared on the image directly. Duskbloods clears its
+    // 24-slice fog volumes one layer at a time; dropping the others let them accumulate to Inf.
+    if (clear_layers.count < layer_count && use_color && !use_depth && !use_stencil) {
+        const u32 rt = regs.clear_surface.RT;
+        const auto [image, view_base] = texture_cache.ColorTargetImage(rt);
+        if (image != nullptr) {
+            const auto format =
+                VideoCore::Surface::PixelFormatFromRenderTargetFormat(regs.rt[rt].format);
+            VkClearColorValue value{};
+            if (!IsPixelFormatInteger(format)) {
+                std::memcpy(value.float32, regs.clear_color.data(), sizeof(value.float32));
+            } else if (!IsPixelFormatSignedInteger(format)) {
+                const size_t int_size = PixelComponentSizeBitsInteger(format);
+                for (size_t i = 0; i < 4; i++)
+                    value.uint32[i] = u32(f32(u64(int_size) << 1U) * regs.clear_color[i]);
+            } else {
+                const size_t int_size = PixelComponentSizeBitsInteger(format);
+                for (size_t i = 0; i < 4; i++)
+                    value.int32[i] = s32(f32(s64(int_size - 1) << 1) * (regs.clear_color[i] - 0.5f));
+            }
+            const bool volume = image->info.type == VideoCommon::ImageType::e3D;
+            const u32 first = static_cast<u32>(view_base) + base_array_layer + clear_layers.count;
+            const u32 image_layers = volume ? 1U : static_cast<u32>(image->info.resources.layers);
+            if (volume || first < image_layers) {
+                const VkImageSubresourceRange range{
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    // A 3D image clears all its slices; the game clears every one to the same value.
+                    .baseArrayLayer = volume ? 0U : first,
+                    .layerCount = volume ? 1U
+                                         : (std::min)(layer_count - clear_layers.count,
+                                                      image_layers - first),
+                };
+                scheduler.RequestOutsideRenderPassOperationContext();
+                scheduler.Record([handle = image->Handle(), range, value](vk::CommandBuffer cmdbuf) {
+                    const auto barrier = [&](VkAccessFlags src, VkAccessFlags dst, VkImageLayout from,
+                                             VkImageLayout to) {
+                        return VkImageMemoryBarrier{
+                            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                            .pNext = nullptr,
+                            .srcAccessMask = src,
+                            .dstAccessMask = dst,
+                            .oldLayout = from,
+                            .newLayout = to,
+                            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                            .image = handle,
+                            .subresourceRange = range,
+                        };
+                    };
+                    constexpr VkAccessFlags ANY = VK_ACCESS_SHADER_READ_BIT |
+                                                  VK_ACCESS_SHADER_WRITE_BIT |
+                                                  VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                                  VK_ACCESS_TRANSFER_READ_BIT |
+                                                  VK_ACCESS_TRANSFER_WRITE_BIT;
+                    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                                           barrier(ANY, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                                   VK_IMAGE_LAYOUT_GENERAL,
+                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
+                    cmdbuf.ClearColorImage(handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, value,
+                                           range);
+                    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                           VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+                                           barrier(VK_ACCESS_TRANSFER_WRITE_BIT, ANY,
+                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                   VK_IMAGE_LAYOUT_GENERAL));
+                });
+            }
+        }
     }
     if (clear_layers.count == 0) {
         return;
@@ -1366,6 +1455,48 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                 Offset2D{.x = clear_rect.rect.offset.x + s32(clear_rect.rect.extent.width),
                          .y = clear_rect.rect.offset.y + s32(clear_rect.rect.extent.height)}};
             blit_image.ClearColor(framebuffer, color_mask, regs.clear_color, dst_region);
+        }
+        // A full zero clear is also a memset of the target's memory. Storage buffers aliasing it
+        // live in the buffer cache and never see the image clear. Duskbloods zeroes its upscaler
+        // scratch arena (1536x1408 RGBA16F at 0x819aaa0000) this way and relies on it for the
+        // tensors' padding rows; stale rows kept NaN alive and whitened the bottom of the image.
+        static constexpr std::array<f32, 4> zero_color{};
+        if (static const bool arena_trace = std::getenv("EDEN_NX2_ARENA_TRACE") != nullptr;
+            arena_trace) {
+            const auto [img, base] = texture_cache.ColorTargetImage(color_attachment);
+            if (img != nullptr && img->info.size.width == 1536) {
+                LOG_WARNING(Render_Vulkan,
+                            "Arena trace: addr={:#x} full={} signed={} covers={} layers_all={} "
+                            "rescaling={} zero={} levels={} layers={} depth={} area={}x{} img={}x{} "
+                            "rect=({},{} {}x{}) scissor={} bytes={:#x} view_base={}",
+                            img->gpu_addr, color_full_channels, is_signed, clear_covers_render_area,
+                            clear_layers.covers_all_layers, texture_cache.IsRescaling(),
+                            std::memcmp(regs.clear_color.data(), zero_color.data(),
+                                        sizeof(zero_color)) == 0,
+                            img->info.resources.levels, img->info.resources.layers,
+                            img->info.size.depth, render_area.width, render_area.height,
+                            img->info.size.width, img->info.size.height, clear_rect.rect.offset.x,
+                            clear_rect.rect.offset.y, clear_rect.rect.extent.width,
+                            clear_rect.rect.extent.height, regs.clear_control.use_scissor.Value(),
+                            img->guest_size_bytes, base);
+            }
+        }
+        if (color_full_channels && !is_signed && clear_covers_render_area &&
+            clear_layers.covers_all_layers &&
+            std::memcmp(regs.clear_color.data(), zero_color.data(), sizeof(zero_color)) == 0) {
+            const auto [image, view_base] = texture_cache.ColorTargetImage(color_attachment);
+            if (image != nullptr && image->info.resources.levels == 1 &&
+                image->info.resources.layers == 1 && image->info.size.depth == 1 &&
+                render_area.width >= ((image->info.size.width * up_scale) >> down_shift) &&
+                render_area.height >= ((image->info.size.height * up_scale) >> down_shift)) {
+                std::scoped_lock buffer_lock{buffer_cache.mutex};
+                const bool cleared = buffer_cache.DMAClear(
+                    image->gpu_addr, image->guest_size_bytes / sizeof(u32), 0);
+                if (std::getenv("EDEN_NX2_ARENA_TRACE") != nullptr && image->info.size.width == 1536) {
+                    LOG_WARNING(Render_Vulkan, "Arena trace: DMAClear {:#x} -> {}", image->gpu_addr,
+                                cleared);
+                }
+            }
         }
     }
 

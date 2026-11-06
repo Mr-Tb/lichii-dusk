@@ -5,6 +5,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <optional>
+#include <string>
 #include <atomic>
 #include <cstring>
 #include <limits>
@@ -711,6 +716,66 @@ PollEvents TranslatePollRevents(short revents) {
     return result;
 }
 
+/// Launcher-driven online redirection (playDB-CNT):
+///   EDEN_NX2_ONLINE_HOSTS=a.com,b.net  names (and their subdomains) resolve to 127.0.0.1
+///   EDEN_NX2_ONLINE_SERVER=ip:port     TCP connects to 127.0.0.1:443 go here instead
+///   EDEN_NX2_LOOPBACK_ONLY=1           other names fail to resolve; non-loopback traffic refused
+struct OnlineRedirect {
+    std::vector<std::string> hosts;
+    std::optional<SockAddrIn> server;
+    bool loopback_only{};
+
+    static const OnlineRedirect& Get() {
+        static const OnlineRedirect config = [] {
+            OnlineRedirect out;
+            if (const char* text = std::getenv("EDEN_NX2_ONLINE_HOSTS")) {
+                std::string list{text};
+                for (size_t start = 0; start < list.size();) {
+                    const size_t end = (std::min)(list.find(',', start), list.size());
+                    if (end > start) {
+                        out.hosts.push_back(list.substr(start, end - start));
+                    }
+                    start = end + 1;
+                }
+            }
+            if (const char* text = std::getenv("EDEN_NX2_ONLINE_SERVER")) {
+                unsigned a, b, c, d, port;
+                if (std::sscanf(text, "%u.%u.%u.%u:%u", &a, &b, &c, &d, &port) == 5 && a < 256 &&
+                    b < 256 && c < 256 && d < 256 && port < 65536) {
+                    out.server = SockAddrIn{Domain::INET,
+                                            {static_cast<u8>(a), static_cast<u8>(b),
+                                             static_cast<u8>(c), static_cast<u8>(d)},
+                                            static_cast<u16>(port)};
+                }
+            }
+            const char* loopback = std::getenv("EDEN_NX2_LOOPBACK_ONLY");
+            out.loopback_only = loopback != nullptr && loopback[0] != '\0' && loopback[0] != '0';
+            if (!out.hosts.empty() || out.server || out.loopback_only) {
+                LOG_INFO(Network, "Online redirect: {} hosts, server={}, loopback_only={}",
+                         out.hosts.size(), out.server.has_value(), out.loopback_only);
+            }
+            return out;
+        }();
+        return config;
+    }
+
+    bool Matches(std::string host) const {
+        std::transform(host.begin(), host.end(), host.begin(),
+                       [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        while (!host.empty() && host.back() == '.') {
+            host.pop_back();
+        }
+        return std::any_of(hosts.begin(), hosts.end(), [&](const std::string& name) {
+            return host == name || (host.size() > name.size() &&
+                                    host.ends_with(name) && host[host.size() - name.size() - 1] == '.');
+        });
+    }
+
+    static bool IsLoopback(const SockAddrIn& addr) {
+        return addr.ip[0] == 127;
+    }
+};
+
 } // Anonymous namespace
 
 NetworkInstance::NetworkInstance() {
@@ -773,8 +838,25 @@ u32 IPv4AddressToInteger(IPv4Address ip_addr) {
            static_cast<u32>(ip_addr[2]) << 8 | static_cast<u32>(ip_addr[3]);
 }
 
+bool IsOnlineRedirectHost(const std::string& host) {
+    return OnlineRedirect::Get().Matches(host);
+}
+
 std::variant<std::vector<AddrInfo>, GetAddrInfoError> GetAddressInfo(
     const std::string& host, const std::optional<std::string>& service) {
+    const auto& redirect = OnlineRedirect::Get();
+    if (redirect.Matches(host)) {
+        u16 port{};
+        if (service) {
+            port = static_cast<u16>(std::strtoul(service->c_str(), nullptr, 10));
+        }
+        LOG_INFO(Network, "Online redirect: resolved {} to 127.0.0.1", host);
+        return std::vector<AddrInfo>{AddrInfo{.family = Domain::INET,
+                                              .socket_type = Type::STREAM,
+                                              .protocol = Protocol::TCP,
+                                              .addr = {Domain::INET, {127, 0, 0, 1}, port},
+                                              .canon_name = std::nullopt}};
+    }
     addrinfo hints{};
     hints.ai_family = AF_INET; // Switch only supports IPv4.
     addrinfo* addrinfo;
@@ -800,6 +882,13 @@ std::variant<std::vector<AddrInfo>, GetAddrInfoError> GetAddressInfo(
         }
     }
     freeaddrinfo(addrinfo);
+    if (redirect.loopback_only) {
+        std::erase_if(ret, [](const AddrInfo& info) { return !OnlineRedirect::IsLoopback(info.addr); });
+        if (ret.empty()) {
+            LOG_INFO(Network, "Online redirect: blocked lookup of {} (loopback only)", host);
+            return GetAddrInfoError::NONAME;
+        }
+    }
     return ret;
 }
 
@@ -940,6 +1029,18 @@ std::pair<SocketBase::AcceptResult, Errno> Socket::Accept() {
 }
 
 Errno Socket::Connect(SockAddrIn addr_in) {
+    const auto& redirect = OnlineRedirect::Get();
+    if (redirect.server && addr_in.ip == IPv4Address{127, 0, 0, 1} && addr_in.portno == 443) {
+        LOG_INFO(Network, "Online redirect: 127.0.0.1:443 -> {}.{}.{}.{}:{}", redirect.server->ip[0],
+                 redirect.server->ip[1], redirect.server->ip[2], redirect.server->ip[3],
+                 redirect.server->portno);
+        addr_in = *redirect.server;
+    }
+    if (redirect.loopback_only && !OnlineRedirect::IsLoopback(addr_in)) {
+        LOG_INFO(Network, "Online redirect: refused connect to {}.{}.{}.{}:{} (loopback only)",
+                 addr_in.ip[0], addr_in.ip[1], addr_in.ip[2], addr_in.ip[3], addr_in.portno);
+        return Errno::CONNREFUSED;
+    }
     const sockaddr host_addr_in = TranslateFromSockAddrIn(addr_in);
     if (connect(fd, &host_addr_in, sizeof(host_addr_in)) != SOCKET_ERROR) {
         return Errno::SUCCESS;
@@ -1188,6 +1289,9 @@ std::pair<s32, Errno> Socket::SendTo(u32 flags, std::span<const u8> message,
     sockaddr host_addr_in;
 
     if (addr) {
+        if (OnlineRedirect::Get().loopback_only && !OnlineRedirect::IsLoopback(*addr)) {
+            return {-1, Errno::NETUNREACH};
+        }
         host_addr_in = TranslateFromSockAddrIn(*addr);
         to = &host_addr_in;
     }

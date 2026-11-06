@@ -97,6 +97,9 @@ static const constexpr std::array blockedDomains = {
 };
 
 static bool IsBlockedHost(const std::string& host) {
+    if (Network::IsOnlineRedirectHost(host)) {
+        return false; // served by the local stand-in servers instead
+    }
     return std::any_of(
         blockedDomains.begin(), blockedDomains.end(),
         [&host](const std::string& domain) { return host.find(domain) != std::string::npos; });

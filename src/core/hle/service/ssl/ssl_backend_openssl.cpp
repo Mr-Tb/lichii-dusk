@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdio>
 #include <mutex>
 
 #include <openssl/bio.h>
@@ -444,6 +445,19 @@ void OneTimeInit() {
         LOG_ERROR(Service_SSL, "SSL_CTX_set_default_verify_paths failed");
         CheckOpenSSLErrors();
         return;
+    }
+
+    // EDEN_NX2_ONLINE_CA=<file.der>: also trust the launcher's local test CA (playDB-CNT).
+    if (const char* ca_path = getenv("EDEN_NX2_ONLINE_CA"); ca_path && *ca_path) {
+        bool added = false;
+        if (std::FILE* file = std::fopen(ca_path, "rb")) {
+            if (X509* ca = d2i_X509_fp(file, nullptr)) {
+                added = X509_STORE_add_cert(SSL_CTX_get_cert_store(ssl_ctx), ca) == 1;
+                X509_free(ca);
+            }
+            std::fclose(file);
+        }
+        LOG_INFO(Service_SSL, "Online test CA {} {}", ca_path, added ? "trusted" : "could not be loaded");
     }
 
     OneTimeInitLogFile();

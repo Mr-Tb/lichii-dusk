@@ -36,8 +36,24 @@ IR::U32 Offset(TranslatorVisitor& v, u64 insn) {
     }
 }
 
+// Native programs: fold the stack in the upper half of the 16 MiB local window onto the end of
+// the local array (see Environment::LocalArraySize). Lower offsets are unchanged.
+IR::U32 FoldNativeStack(TranslatorVisitor& v, const IR::U32& offset) {
+    if (!v.env.IsNativeProgram()) {
+        return offset;
+    }
+    constexpr u32 upper_half{Environment::LOCAL_WINDOW_SIZE / 2};
+    const u32 delta{v.env.LocalArraySize() - Environment::LOCAL_WINDOW_SIZE};
+    if (offset.IsImmediate()) {
+        const u32 value{offset.U32()};
+        return v.ir.Imm32(value >= upper_half ? value + delta : value);
+    }
+    const IR::U1 high{v.ir.IGreaterThanEqual(offset, v.ir.Imm32(upper_half), false)};
+    return IR::U32{v.ir.Select(high, v.ir.IAdd(offset, v.ir.Imm32(delta)), offset)};
+}
+
 std::pair<IR::U32, IR::U32> WordOffset(TranslatorVisitor& v, u64 insn) {
-    const IR::U32 offset{Offset(v, insn)};
+    const IR::U32 offset{FoldNativeStack(v, Offset(v, insn))};
     if (offset.IsImmediate()) {
         return {v.ir.Imm32(offset.U32() / 4), offset};
     } else {
@@ -89,7 +105,7 @@ IR::U32 ShortOffset(IR::IREmitter& ir, const IR::U32& offset) {
 }
 
 IR::U32 LoadLocal(TranslatorVisitor& v, const IR::U32& word_offset, const IR::U32& offset) {
-    const IR::U32 local_memory_size{v.ir.Imm32(v.env.LocalMemorySize())};
+    const IR::U32 local_memory_size{v.ir.Imm32(v.env.LocalArraySize())};
     const IR::U1 in_bounds{v.ir.ILessThan(offset, local_memory_size, false)};
     return IR::U32{v.ir.Select(in_bounds, v.ir.LoadLocal(word_offset), v.ir.Imm32(0))};
 }
@@ -154,9 +170,9 @@ void TranslatorVisitor::STL(u64 insn) {
     const auto [word_offset, offset]{WordOffset(*this, insn)};
     if (offset.IsImmediate()) {
         // TODO: Support storing out of bounds at runtime
-        if (offset.U32() >= env.LocalMemorySize()) {
+        if (offset.U32() >= env.LocalArraySize()) {
             LOG_WARNING(Shader, "Storing local memory at {:#x} with a size of {:#x}, dropping",
-                        offset.U32(), env.LocalMemorySize());
+                        offset.U32(), env.LocalArraySize());
             return;
         }
     }

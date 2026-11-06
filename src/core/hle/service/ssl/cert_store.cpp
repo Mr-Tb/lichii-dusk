@@ -4,6 +4,11 @@
 // SPDX-FileCopyrightText: Copyright 2024 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
+#include <optional>
+
 #include "common/alignment.h"
 #include "core/core.h"
 #include "core/file_sys/content_archive.h"
@@ -80,6 +85,26 @@ CertStore::~CertStore() = default;
 
 template <typename F>
 void CertStore::ForEachCertificate(std::span<const CaCertificateId> certificate_ids, F&& f) {
+    // EDEN_NX2_ONLINE_CA=<file.der>: the launcher's local test CA (playDB-CNT). Games that run TLS
+    // in-process build their trust store from these lists, so it goes into every one.
+    static const std::optional<std::pair<const CaCertificateId, Certificate>> online_ca = [] {
+        std::optional<std::pair<const CaCertificateId, Certificate>> out;
+        const char* path = std::getenv("EDEN_NX2_ONLINE_CA");
+        if (!path || !*path) {
+            return out;
+        }
+        std::ifstream file{path, std::ios::binary};
+        std::vector<u8> der{std::istreambuf_iterator<char>{file}, {}};
+        LOG_INFO(Service_SSL, "Online test CA {}: {} bytes", path, der.size());
+        if (!der.empty()) {
+            out.emplace(static_cast<CaCertificateId>(0x7FFF0001),
+                        Certificate{.status = TrustedCertStatus::EnabledTrusted, .der_data = std::move(der)});
+        }
+        return out;
+    }();
+    if (online_ca) {
+        f(*online_ca);
+    }
     if (certificate_ids.size() == 1 && certificate_ids.front() == CaCertificateId::All) {
         for (const auto& entry : m_certs) {
             f(entry);

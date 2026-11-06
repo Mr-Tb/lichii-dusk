@@ -934,9 +934,17 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 break;
             }
             if (insn.Bits(24, 8) != 255 || insn.Bits(64, 8) != 255 || insn.words[2] != 0x078e00ff) {
-                if ((insn.words[2] & ~0x2ffU) != 0x078e0000 || (opcode == 0x624 && insn.Bits(62, 2)))
+                // 0x624 bit 63 negates the constant-buffer addend, as bit 63 does for 0xe24.
+                const bool negate_c = opcode == 0x624 && insn.Bits(63, 1) != 0;
+                if ((insn.words[2] & ~0x2ffU) != 0x078e0000 || (opcode == 0x624 && insn.Bits(62, 1)))
                     return fail(index, "native multiply wide addend mode");
-                const u32 a = operand(0, false), b = operand(1, false), c = operand(2, false);
+                const u32 a = operand(0, false), b = operand(1, false);
+                u32 c = operand(2, false);
+                if (negate_c) {
+                    emit(0x5c10000000000000ULL | predicate | 252 | (u64{255} << 8) | (u64{c} << 20) |
+                         (u64{1} << 48));
+                    c = 252;
+                }
                 multiply_low(a, b, c, false);
                 break;
             }
@@ -2487,12 +2495,14 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             }
             break;
         }
-        case 0xb63: case 0xf63: { // TLD4 (gather); component at bits 87-88.
+        case 0xb63: case 0xf63: case 0x364: { // TLD4 (gather); component at bits 87-88.
             // 0xf63: the handle in a uniform register (bit 91), Maxwell TLD4.B with the handle in Rb.
-            const bool bindless = opcode == 0xf63;
-            const u32 handle = bindless ? uniform_register(insn.Bits(40, 6)) : 255;
+            // 0x364: TLD4.B (bit 59), 2D only: x, y in Ra, Ra+1 and the handle in Rb, as for 0x361.
+            const bool bindless = opcode != 0xb63;
             const u32 mask = insn.Bits(72, 4), second_dest = insn.Bits(64, 8);
             const u32 source_a = insn.Bits(24, 8), source_b = insn.Bits(32, 8);
+            const u32 handle = opcode == 0xf63 ? uniform_register(insn.Bits(40, 6))
+                             : opcode == 0x364 ? source_b : 255U;
             const u32 binding = insn.Bits(54, 5);
             // Bit 76: a texel offset after the coordinates (x, y in Ra, Ra+1, offsets in Rb, as
             // for TEX); Maxwell TLD4 takes it as AOFFI (bits 54-55) from Rb.
@@ -2518,8 +2528,12 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                     (insn.words[3] & 0xc00001ffU))
                     return fail(index, "native uniform array texture gather mode");
             }
+            if (opcode == 0x364 &&
+                (array || offsets || per_tap || depth || half || !insn.Bits(60, 1) ||
+                 insn.Bits(40, 19) || insn.Bits(91, 1) || source_a == 255 || source_a + 2 > register_limit))
+                return fail(index, "native register-handle texture gather mode");
             if ((insn.Bits(61, 3) != 1 && !array) || (insn.Bits(77, 1) && !per_tap) || insn.Bits(81, 3) != 7 ||
-                insn.Bits(59, 1) ||
+                insn.Bits(59, 1) != (opcode == 0x364 ? 1U : 0U) ||
                 (depth && (bindless || array || offsets || per_tap || half ||
                            !insn.Bits(60, 1) || insn.Bits(80, 1) || insn.Bits(91, 1) ||
                            (source_a != 255 && source_a + 2 > register_limit) ||
@@ -2537,7 +2551,7 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
                 (offsets && (bindless || source_b == 255 || (source_a != 255 && source_a >= 245))) ||
                 (per_tap && (bindless || depth || insn.Bits(80, 1) || insn.Bits(91, 1))) ||
                 insn.Bits(89, 1) || mask == 0 ||
-                (bindless ? (handle >= 246 || insn.Bits(46, 13) || !insn.Bits(91, 1))
+                (bindless ? (handle >= 246 || (opcode == 0xf63 && (insn.Bits(46, 13) || !insn.Bits(91, 1))))
                           : (insn.Bits(40, 14) > 0x1fff || binding >= 18 ||
                              (result.required_texture_buffer != ~0U && result.required_texture_buffer != binding))))
                 return fail(index, "native texture gather mode");
@@ -2647,7 +2661,8 @@ inline LoweredProgram LowerToMaxwellWith(std::span<const Instruction> code, u32 
             if (!bindless) result.required_texture_buffer = binding;
             // Two coordinates: x in Ra, y in Rb (the coordinate list splits evenly across them);
             // with an offset, x and y in Ra, Ra+1 and the offset in Rb.
-            const u32 y = !offsets && !per_tap && !depth ? source_b : source_a == 255 ? 255U : source_a + 1;
+            const u32 y = opcode != 0x364 && !offsets && !per_tap && !depth ? source_b
+                        : source_a == 255 ? 255U : source_a + 1;
             emit(0x5c98000000000000ULL | predicate | 250 | (u64{15} << 39) | (u64{source_a} << 20));
             emit(0x5c98000000000000ULL | predicate | 251 | (u64{15} << 39) |
                  (u64{array ? source_a + 1 : y} << 20));

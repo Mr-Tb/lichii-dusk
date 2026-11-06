@@ -719,6 +719,26 @@ size_t MemoryManager::MaxContinuousRange(GPUVAddr gpu_addr, size_t size) const {
         u64 serial;
         size_t result;
     };
+    if (VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::Bounds)) {
+        // The map-time runs are maximal: the answer is the rest of the run holding gpu_addr.
+        const auto& runs = CurrentSnapshot().runs;
+        auto it = std::upper_bound(runs.begin(), runs.end(), gpu_addr,
+                                   [](GPUVAddr key, const auto& run) { return key < run.begin; });
+        size_t result = 0;
+        if (it != runs.begin() && gpu_addr < std::prev(it)->end) {
+            result = (std::min)(size, static_cast<size_t>(std::prev(it)->end - gpu_addr));
+        }
+        if (VideoCommon::Nx2Perf::Verify()) {
+            const size_t expected = MaxContinuousRangeUncached(gpu_addr, size);
+            static std::atomic<u32> logged{};
+            if (expected != result && logged.fetch_add(1, std::memory_order_relaxed) < 64) {
+                LOG_ERROR(HW_GPU, "Nx2Perf mapping runs: MaxContinuousRange({:#x}, {:#x}) = {:#x}, walk {:#x}",
+                          gpu_addr, size, result, expected);
+            }
+            return expected;
+        }
+        return result;
+    }
     thread_local std::array<Entry, 1024> cache{};
     const u64 serial = map_serial.load(std::memory_order_acquire);
     Entry& entry = cache[(gpu_addr * 0x9E3779B97F4A7C15ULL) >> 54];
@@ -1007,7 +1027,35 @@ bool MemoryManager::IsFullyMappedRange(GPUVAddr gpu_addr, std::size_t size) cons
 boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32>
 MemoryManager::GetSubmappedRange(GPUVAddr gpu_addr, std::size_t size) const {
     boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> result{};
-    GetSubmappedRangeImpl<true>(gpu_addr, size, result);
+    if (!VideoCommon::Nx2Perf::On(VideoCommon::Nx2Perf::Opt::Bounds) || size == 0) {
+        GetSubmappedRangeImpl<true>(gpu_addr, size, result);
+        return result;
+    }
+    // Each map-time run is one segment of the walk, clipped to [gpu_addr, gpu_addr + size).
+    const GPUVAddr end = gpu_addr + size;
+    const auto& runs = CurrentSnapshot().runs;
+    auto it = std::upper_bound(runs.begin(), runs.end(), gpu_addr,
+                               [](GPUVAddr key, const auto& run) { return key < run.begin; });
+    if (it != runs.begin()) {
+        --it;
+    }
+    for (; it != runs.end() && it->begin < end; ++it) {
+        const GPUVAddr begin = (std::max)(it->begin, gpu_addr);
+        const GPUVAddr run_end = (std::min)(it->end, end);
+        if (begin < run_end) {
+            result.emplace_back(begin, static_cast<size_t>(run_end - begin));
+        }
+    }
+    if (VideoCommon::Nx2Perf::Verify()) {
+        boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> expected{};
+        GetSubmappedRangeImpl<true>(gpu_addr, size, expected);
+        static std::atomic<u32> logged{};
+        if (expected != result && logged.fetch_add(1, std::memory_order_relaxed) < 64) {
+            LOG_ERROR(HW_GPU, "Nx2Perf mapping runs: GetSubmappedRange({:#x}, {:#x}) gave {} segments, walk {}",
+                      gpu_addr, size, result.size(), expected.size());
+        }
+        return expected;
+    }
     return result;
 }
 

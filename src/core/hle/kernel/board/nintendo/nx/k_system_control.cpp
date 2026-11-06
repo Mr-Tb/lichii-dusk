@@ -4,7 +4,9 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <cstdlib>
 #include <random>
+#include <string_view>
 
 #include "common/literals.h"
 #include "common/random.h"
@@ -133,6 +135,11 @@ std::size_t KSystemControl::Init::GetApplicationPoolSize() {
         case Smc::MemoryArrangement_10GB:
             return 8178_MiB;
         case Smc::MemoryArrangement_12GB:
+            // Experimental Duskbloods bring-up: opt in only when the launcher requests it.
+            if (const char* probe = std::getenv("EDEN_NX2_APP_POOL_PROBE");
+                probe != nullptr && std::string_view{probe} == "1152") {
+                return 10961_MiB;
+            }
             return 9809_MiB;
         }
     }();

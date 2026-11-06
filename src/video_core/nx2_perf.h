@@ -83,11 +83,11 @@ inline bool On(Opt opt) {
             }
             return bits;
         };
-        const unsigned default_off = bit(Opt::FramesAhead) | bit(Opt::CleanWords) |
-                                     bit(Opt::IndexRebind) | bit(Opt::SubmitBudget) |
-                                     bit(Opt::FenceFlush) | bit(Opt::FragmentBarrier) |
-                                     bit(Opt::FrontSleep) | bit(Opt::AsyncPipelines) |
-                                     bit(Opt::Bounds);
+        // Duskbloods build: bounds (now also MaxContinuousRange / GetSubmappedRange), clean_words
+        // and front_sleep are on by default; verified exact with EDEN_NX2_PERF_VERIFY=1.
+        const unsigned default_off = bit(Opt::FramesAhead) | bit(Opt::IndexRebind) |
+                                     bit(Opt::SubmitBudget) | bit(Opt::FenceFlush) |
+                                     bit(Opt::FragmentBarrier) | bit(Opt::AsyncPipelines);
         unsigned mask = (default_off & ~names("EDEN_NX2_PERF_ON")) | names("EDEN_NX2_PERF_OFF");
         mask |= bit(Opt::SplitOverlap);
         if (const char* value = std::getenv("EDEN_NX2_PERF_FRAMES_AHEAD"); value && value[0] == '0') {
