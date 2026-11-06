@@ -8,13 +8,11 @@
 
 # Lichii for The Duskbloods (Network Test)
 
-<p align="center">
-  <a href="#english">English</a> | <a href="#arabic">العربية</a>
-</p>
+<p align="center"><b>Choose your language / اختر اللغة</b></p>
 
 <a id="english"></a>
-<details open>
-<summary><b>English</b></summary>
+<details name="lang">
+<summary><b>English: open the guide</b></summary>
 
 **This is a fork of [Frizti/Lichii](https://github.com/Frizti/Lichii) (`frizti-v2`), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with an NVIDIA GPU and an Intel CPU.**
 It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game.
@@ -107,8 +105,8 @@ Built on [Frizti/Lichii](https://github.com/Frizti/Lichii), [zortos293/Lichii](h
 </details>
 
 <a id="arabic"></a>
-<details>
-<summary><b>العربية</b></summary>
+<details name="lang">
+<summary><b>العربية: افتح الدليل</b></summary>
 
 <div dir="rtl">
 
