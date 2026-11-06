@@ -12,7 +12,7 @@
 
 # Lichii for The Duskbloods (Network Test)
 
-**This is a fork of [Frizti/Lichii](https://github.com/Frizti/Lichii) (`frizti-v2`), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with NVIDIA and Intel GPUs.**
+**This is a fork of [Frizti/Lichii](https://github.com/Frizti/Lichii) (`frizti-v2`), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with an NVIDIA GPU and an Intel CPU.**
 It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
@@ -40,7 +40,7 @@ The emulator is mostly CPU-bound in this game, so a faster CPU helps more than a
 | Rendering | TAA black stripes (native stack spills), the fog volume turning white/NaN (per-layer 3D clears), white waves at the bottom of the screen (NN-upscaler arena clear), two missing Ampere shader instructions |
 | Performance | Faster storage-buffer range lookups, clean buffer-sync skipping, and a sleeping (not spinning) GPU front thread |
 
-**GPUs:** tested on **NVIDIA (RTX 3060)**. The fixes are vendor-neutral Vulkan, so **Intel Arc / Intel iGPUs and AMD should work, but are untested**. Please report your results. Use a current GPU driver.
+**Tested on:** an **NVIDIA RTX 3060** GPU with an **Intel Core i5-12400F** CPU. Other NVIDIA GPUs should behave the same; AMD and Intel GPUs are untested. Use a current GPU driver.
 
 ## Download
 
