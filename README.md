@@ -6,22 +6,41 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
+<p align="center">
+  <b>English</b> | <a href="README.ar.md">العربية</a>
+</p>
+
 # Lichii for The Duskbloods (Network Test)
 
-**This is a fork of [Frizti/Lichii](https://github.com/Frizti/Lichii) (`frizti-v2`), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs.**
+**This is a fork of [Frizti/Lichii](https://github.com/Frizti/Lichii) (`frizti-v2`), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with NVIDIA and Intel GPUs.**
 It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
 
-### What this fork changes
+## Performance
+
+Measured by the maintainer in actual play:
+
+| | |
+|---|---|
+| CPU | Intel Core i5-12400F |
+| GPU | NVIDIA GeForce RTX 3060 (12 GB), driver 616.56 |
+| RAM | 16 GB |
+| Average | **~40 fps** |
+| Peak | **~50 fps** |
+| Heaviest area | **36+ fps** (13-16 fps before this fork's optimizations) |
+
+The emulator is mostly CPU-bound in this game, so a faster CPU helps more than a faster GPU.
+
+## What this fork changes
 
 | Area | Fix |
 |---|---|
 | Online check | Works with the playDB-CNT launcher: host redirect, loopback-only networking, the launcher's CA in the game's trust store, a BCAT file-name check (error 2122-0001) |
 | Rendering | TAA black stripes (native stack spills), the fog volume turning white/NaN (per-layer 3D clears), white waves at the bottom of the screen (NN-upscaler arena clear), two missing Ampere shader instructions |
-| Performance | Faster storage-buffer range lookups, clean buffer-sync skipping, and a sleeping (not spinning) GPU front thread. On an RTX 3060 + i5-12400F the heaviest area went from **13-16 fps to 36+ fps** |
+| Performance | Faster storage-buffer range lookups, clean buffer-sync skipping, and a sleeping (not spinning) GPU front thread |
 
-**GPUs:** tested on **NVIDIA (RTX 3060, driver 616.56)**. The fixes are vendor-neutral Vulkan, so **Intel Arc / Intel iGPUs and AMD should work, but are untested**. Please report your results. Use a current GPU driver.
+**GPUs:** tested on **NVIDIA (RTX 3060)**. The fixes are vendor-neutral Vulkan, so **Intel Arc / Intel iGPUs and AMD should work, but are untested**. Please report your results. Use a current GPU driver.
 
 ## Download
 
@@ -53,7 +72,7 @@ Steps:
 
 The first minutes stutter while shaders compile; this improves with each session.
 
-### Recommended settings (already set in the zip)
+## Recommended settings (already set in the zip)
 
 | Setting | Value | Why |
 |---|---|---|
@@ -65,7 +84,7 @@ The first minutes stutter while shaders compile; this improves with each session
 | Error applet | HLE | The LLE applet crashes the emulator |
 | Docked mode | On | |
 
-### Troubleshooting
+## Troubleshooting
 
 - **Stuck on "checking save data" or network errors:** start through `Play.Duskbloods.exe`, not `lichii.exe` directly.
 - **Error 2153-0513 at boot:** a save got corrupted, e.g. by force-closing during a save. Move the game's save folder under `user\nand\user\save\` aside and start again.
@@ -73,91 +92,10 @@ The first minutes stutter while shaders compile; this improves with each session
 - **Black screen on first boot after updating:** delete the shader cache in `user\shader\`.
 - **Missing DLL errors:** extract the whole zip. Do not run `lichii.exe` from inside the archive.
 
-### Building from source
+## Building from source
 
 Branch [`dusk-frizti`](https://github.com/Mr-Tb/Lichii/tree/dusk-frizti). Build with MSYS2 UCRT64 + clang, exactly as upstream Lichii.
 
----
-
-
-<p align="center">
-  <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
-</p>
-
-# Lichii
-
-Lichii is an experimental, open-source Nintendo Switch and Switch 2 emulator written in C++. It builds on Eglantine, Eden, yuzu and Sudachi, preserving their contributions while developing this fork's game compatibility and renderer fixes.
-
-This is an independent fork, not an official release of those upstream projects. Lichii is not affiliated with Nintendo.
-
-## Downloads and setup
-
-Published builds belong on this fork's [releases page](https://github.com/zortos293/Eglantine/releases). The repository still uses its historical Eglantine name; the desktop application is now Lichii.
-
-On Windows, extract the entire build archive and run **lichii.exe**. Only use games and system files you have legally obtained. Games, keys and firmware are not included.
-
-### Existing saves and settings
-
-The rebrand intentionally retains the existing Eden/Eglantine data directories and configuration keys. It does not move or delete saves, settings or shader caches. Back up your saves before testing experimental builds.
-
-## Compatibility and issue reports
-
-Compatibility and performance vary by game, hardware and driver. Rendering errors, stutters and crashes remain possible. Passing automated tests does not establish that a game renders correctly, and this project makes no universal frame-rate guarantee.
-
-When [reporting an issue](https://github.com/zortos293/Eglantine/issues), include:
-
-- The exact build, game version, CPU, GPU and driver version.
-- Relevant settings and steps to reproduce the problem.
-- A screenshot and the log from the affected session, after checking it for personal information.
-
-Do not upload game files, keys, firmware or private account information.
-
-## Building and contributing
-
-See the [build guide](docs/Build.md), [user documentation](docs/user/README.md) and [coding guidelines](docs/Coding.md). Some inherited documentation and internal build target names still use upstream names. The GUI build target remains `yuzu`; its output is `lichii.exe` on Windows and `lichii` on other desktop platforms.
-
-Keep changes focused and distinguish code-level checks from actual gameplay testing.
-
-## Artwork
-Art created by YOB (yobslab)
-The supplied Lichii logo, icon and library artwork are in [dist/branding](dist/branding). Windows, Linux and macOS icon resources are generated from that artwork by [Generate-LichiiIcons.ps1](tools/Generate-LichiiIcons.ps1).
-
-## Support Lichii
-
-Lichii is free and stays free. If you want to help, you can donate in crypto. Donations help pay for the AI tools and build machines used to develop this open-source project faster.
-
-**Solana (SOL)**
-```text
-JepEjfyWjGjhJvHSrqj52KtLjcbbbmUh1iGqerYBF4w
-```
-
-**Ethereum (ETH)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
-
-**Bitcoin (BTC)**
-```text
-bc1qcvxdpf4qvdhqp8ee4s355cjmxrzsphsdwpl8w4
-```
-
-**BNB Smart Chain (BNB)**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
-
-**Polygon**
-```text
-0x055ABa1b80Bc35C836Ce7E9F47c2b3d6C75b5534
-```
-
-Send each coin on its matching network. Coins sent on the wrong network can't be recovered.
-
-> [!NOTE]
-> Donations are voluntary gifts and are non-refundable. A donation does not buy any product, service, perk, early access, exclusive build, priority support or say in the project. Every release stays free and public for everyone.
-
 ## Credits and license
 
-Lichii inherits the work of the Eglantine, Eden, yuzu and Sudachi projects and their contributors, including Eglantine's original developer Camille LaVey. Original copyright notices and third-party licenses are retained.
-
-See [LICENSE.txt](LICENSE.txt) and the source files for applicable license terms.
+Built on [Frizti/Lichii](https://github.com/Frizti/Lichii), [zortos293/Lichii](https://github.com/zortos293/Lichii), [Eglantine](https://github.com/Djihads80/Eglantine), Eden, yuzu and Sudachi. The launcher and network-test servers are [playDB-CNT](https://github.com/sikoGD/playDB-CNT) by sikoGD. Licensed under GPL-3.0-or-later (see [LICENSE.txt](LICENSE.txt)).
