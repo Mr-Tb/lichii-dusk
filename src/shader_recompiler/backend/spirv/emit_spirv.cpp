@@ -444,10 +444,10 @@ void SetupDenormControl(const Profile& profile, const IR::Program& program, Emit
 
 void SetupSignedNanCapabilities(const Profile& profile, const IR::Program& program,
                                 EmitContext& ctx, Id main_func) {
-    if (profile.has_broken_fp16_float_controls && program.info.uses_fp16) {
-        return;
-    }
-    if (program.info.uses_fp16 && profile.support_fp16_signed_zero_nan_preserve) {
+    // The broken-driver workaround only drops the fp16 mode: without the fp32 one, NVIDIA folds
+    // clamps such as min(max(1/x, -FLT_MAX), FLT_MAX) away and 0 * (1/0) becomes NaN.
+    if (program.info.uses_fp16 && profile.support_fp16_signed_zero_nan_preserve &&
+        !profile.has_broken_fp16_float_controls) {
         ctx.AddCapability(spv::Capability::SignedZeroInfNanPreserve);
         ctx.AddExecutionMode(main_func, spv::ExecutionMode::SignedZeroInfNanPreserve, 16U);
     }

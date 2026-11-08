@@ -117,6 +117,17 @@ public:
 
     [[nodiscard]] virtual u32 LocalMemorySize() const = 0;
 
+    /// Ampere code keeps its stack at the top of the 16 MiB local window (c[0][0x28] is just below
+    /// 16 MiB) and grows it down. Native programs get this many bytes at the end of the local array
+    /// for that region; offsets in the window's upper half are folded onto it.
+    static constexpr u32 NATIVE_LOCAL_STACK_RESERVE = 0x800;
+    static constexpr u32 LOCAL_WINDOW_SIZE = 0x1000000;
+
+    /// Size of the local array the program needs, including the native stack region.
+    [[nodiscard]] u32 LocalArraySize() const {
+        return LocalMemorySize() + (IsNativeProgram() ? NATIVE_LOCAL_STACK_RESERVE : 0U);
+    }
+
     [[nodiscard]] virtual u32 SharedMemorySize() const = 0;
 
     [[nodiscard]] virtual std::array<u32, 3> WorkgroupSize() const = 0;

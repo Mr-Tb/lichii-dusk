@@ -695,10 +695,16 @@ private:
             }
             auto backing = back_whole ? AllocateGpuOnlyBacking(size, true, false) : std::nullopt;
             std::scoped_lock lk{m_region_mutex};
-            if ((w[7] & SparseRegionFlag) == 0) {
+            const char* map_probe = std::getenv("EDEN_NX2_GPU_MAP_FLAG_PROBE");
+            const bool external_tiles = map_probe != nullptr && std::string_view{map_probe} == "1";
+            if ((w[7] & SparseRegionFlag) == 0 && !external_tiles) {
                 m_gpu_only_ranges[start] = size; // kept out of 216, however it is backed
             }
-            if (lazy_sparse) {
+            if (external_tiles) {
+                LOG_INFO(Service,
+                         "Experimental GPU region [{:#x}, {:#x}] uses client tile backing",
+                         start, last);
+            } else if ((w[7] & SparseRegionFlag) != 0 && LazySparseRegions()) {
                 // Title 1's terrain texture arrays and layer pools (170 MB-5.8 GB, mostly empty):
                 // backed whole, they ran the pool dry and the later ones got no memory at all.
                 // The region gets a device range of its own, unbacked pages read zero, and
@@ -1336,7 +1342,7 @@ private:
         LOG_DEBUG(Service, "nx2:gpu 216 map [{:#x}, +{:#x}] -> memory {} offset {:#x} kind {:#x}",
                   gpu_address, size, request.memory_handle, request.offset, request.kind);
         if (region == nullptr) {
-            registry.MapAt(gpu_address, cpu_address, size);
+            registry.MapAt(request.memory_handle, request.offset, gpu_address, cpu_address, size);
             return;
         }
         if (!region->tiles) {

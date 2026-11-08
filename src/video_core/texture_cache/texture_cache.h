@@ -3639,7 +3639,14 @@ ImageViewId TextureCache<P>::FindRenderTargetView(const ImageInfo& info, GPUVAdd
     } else {
         base = image.TryFindBase(gpu_addr).value();
     }
-    const s32 layers = image.info.type == ImageType::e3D ? info.size.depth : info.resources.layers;
+    // Layers come from the render target's own description: a 3D image can be bound as a layered
+    // (DefineArraySize) target, whose depth is in resources.layers, not size.depth (Duskbloods
+    // clears its 24-slice fog volumes one layer at a time this way).
+    s32 layers = static_cast<s32>(info.type == ImageType::e3D ? info.size.depth
+                                                              : static_cast<u32>(info.resources.layers));
+    if (image.info.type == ImageType::e3D) {
+        layers = (std::min)(layers, (std::max)(static_cast<s32>(image.info.size.depth) - base.layer, 1));
+    }
     if (RenderTrace::SampleFrame(frame_tick)) {
         LOG_DEBUG(HW_GPU,
                   "Render trace target match: docked={} requested={:#x} {}x{} layers={} format={} "

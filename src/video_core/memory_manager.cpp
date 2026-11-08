@@ -1015,7 +1015,36 @@ bool MemoryManager::IsFullyMappedRange(GPUVAddr gpu_addr, std::size_t size) cons
 boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32>
 MemoryManager::GetSubmappedRange(GPUVAddr gpu_addr, std::size_t size) const {
     boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> result{};
-    GetSubmappedRangeImpl<true>(gpu_addr, size, result);
+    if (size == 0 || !IsWithinGPUAddressRange(gpu_addr) || size > address_space_size - gpu_addr) {
+        GetSubmappedRangeImpl<true>(gpu_addr, size, result);
+        return result;
+    }
+    // Each map-time run is one segment of the walk, clipped to [gpu_addr, gpu_addr + size).
+    const GPUVAddr end = gpu_addr + size;
+    const auto& runs = CurrentSnapshot().runs;
+    auto it = std::upper_bound(
+        runs.begin(), runs.end(), gpu_addr,
+        [](GPUVAddr address, const MappingSnapshot::Run& run) { return address < run.begin; });
+    if (it != runs.begin()) {
+        --it;
+    }
+    for (; it != runs.end() && it->begin < end; ++it) {
+        const GPUVAddr begin = (std::max)(it->begin, gpu_addr);
+        const GPUVAddr run_end = (std::min)(it->end, end);
+        if (begin < run_end) {
+            result.emplace_back(begin, static_cast<size_t>(run_end - begin));
+        }
+    }
+    if (VideoCommon::Nx2Perf::Verify()) {
+        boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> expected{};
+        GetSubmappedRangeImpl<true>(gpu_addr, size, expected);
+        static std::atomic<u32> logged{};
+        if (expected != result && logged.fetch_add(1, std::memory_order_relaxed) < 64) {
+            LOG_ERROR(HW_GPU, "Nx2Perf mapping runs: GetSubmappedRange({:#x}, {:#x}) gave {} segments, walk {}",
+                      gpu_addr, size, result.size(), expected.size());
+        }
+        return expected;
+    }
     return result;
 }
 

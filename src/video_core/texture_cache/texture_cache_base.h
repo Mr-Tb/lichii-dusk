@@ -367,6 +367,19 @@ public:
         return std::exchange(churn, {});
     }
 
+    /// The image behind colour render target `index`, with the view's base layer; nullptr if none.
+    [[nodiscard]] std::pair<Image*, s32> ColorTargetImage(size_t index) {
+        const ImageViewId view_id = render_targets.color_buffer_ids[index];
+        if (!view_id) {
+            return {nullptr, 0};
+        }
+        const ImageView& view = slot_image_views[view_id];
+        if (!view.image_id) {
+            return {nullptr, 0};
+        }
+        return {&slot_images[view.image_id], view.range.base.layer};
+    }
+
     /// Mark images in a range as modified from the CPU
     void WriteMemory(DAddr cpu_addr, size_t size);
 

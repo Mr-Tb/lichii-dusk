@@ -2154,6 +2154,81 @@ void RasterizerVulkan::Clear(u32 layer_count) {
     if (ClearVolumeSlices(framebuffer, base_array_layer, layer_count)) {
         return;
     }
+
+    // Layers the framebuffer cannot reach (another attachment has fewer layers, or the target is a
+    // 3D image bound as a layered target) are cleared on the image directly. Duskbloods clears its
+    // 24-slice fog volumes one layer at a time; dropping the others let them accumulate to Inf.
+    if (clear_layers.count < layer_count && use_color && !use_depth && !use_stencil) {
+        const u32 rt = regs.clear_surface.RT;
+        const auto [image, view_base] = texture_cache.ColorTargetImage(rt);
+        if (image != nullptr) {
+            const auto format =
+                VideoCore::Surface::PixelFormatFromRenderTargetFormat(regs.rt[rt].format);
+            VkClearColorValue value{};
+            if (!IsPixelFormatInteger(format)) {
+                std::memcpy(value.float32, regs.clear_color.data(), sizeof(value.float32));
+            } else if (!IsPixelFormatSignedInteger(format)) {
+                const size_t int_size = PixelComponentSizeBitsInteger(format);
+                for (size_t i = 0; i < 4; i++)
+                    value.uint32[i] = u32(f32(u64(int_size) << 1U) * regs.clear_color[i]);
+            } else {
+                const size_t int_size = PixelComponentSizeBitsInteger(format);
+                for (size_t i = 0; i < 4; i++)
+                    value.int32[i] = s32(f32(s64(int_size - 1) << 1) * (regs.clear_color[i] - 0.5f));
+            }
+            const bool volume = image->info.type == VideoCommon::ImageType::e3D;
+            const u32 first = static_cast<u32>(view_base) + base_array_layer + clear_layers.count;
+            const u32 image_layers = volume ? 1U : static_cast<u32>(image->info.resources.layers);
+            if (volume || first < image_layers) {
+                const VkImageSubresourceRange range{
+                    .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    // A 3D image clears all its slices; the game clears every one to the same value.
+                    .baseArrayLayer = volume ? 0U : first,
+                    .layerCount = volume ? 1U
+                                         : (std::min)(layer_count - clear_layers.count,
+                                                      image_layers - first),
+                };
+                scheduler.RequestOutsideRenderPassOperationContext();
+                scheduler.Record([handle = image->Handle(), range, value](vk::CommandBuffer cmdbuf) {
+                    const auto barrier = [&](VkAccessFlags src, VkAccessFlags dst, VkImageLayout from,
+                                             VkImageLayout to) {
+                        return VkImageMemoryBarrier{
+                            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+                            .pNext = nullptr,
+                            .srcAccessMask = src,
+                            .dstAccessMask = dst,
+                            .oldLayout = from,
+                            .newLayout = to,
+                            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                            .image = handle,
+                            .subresourceRange = range,
+                        };
+                    };
+                    constexpr VkAccessFlags ANY = VK_ACCESS_SHADER_READ_BIT |
+                                                  VK_ACCESS_SHADER_WRITE_BIT |
+                                                  VK_ACCESS_COLOR_ATTACHMENT_READ_BIT |
+                                                  VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT |
+                                                  VK_ACCESS_TRANSFER_READ_BIT |
+                                                  VK_ACCESS_TRANSFER_WRITE_BIT;
+                    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                                           VK_PIPELINE_STAGE_TRANSFER_BIT, 0,
+                                           barrier(ANY, VK_ACCESS_TRANSFER_WRITE_BIT,
+                                                   VK_IMAGE_LAYOUT_GENERAL,
+                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL));
+                    cmdbuf.ClearColorImage(handle, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, value,
+                                           range);
+                    cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_TRANSFER_BIT,
+                                           VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0,
+                                           barrier(VK_ACCESS_TRANSFER_WRITE_BIT, ANY,
+                                                   VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                                   VK_IMAGE_LAYOUT_GENERAL));
+                });
+            }
+        }
+    }
     if (clear_layers.count == 0) {
         return;
     }
@@ -2298,6 +2373,23 @@ void RasterizerVulkan::Clear(u32 layer_count) {
                 Offset2D{.x = clear_rect.rect.offset.x + s32(clear_rect.rect.extent.width),
                          .y = clear_rect.rect.offset.y + s32(clear_rect.rect.extent.height)}};
             blit_image.ClearColor(framebuffer, color_mask, regs.clear_color, dst_region);
+        }
+        // A full zero clear is also a memset of the target's memory. Storage buffers aliasing it
+        // live in the buffer cache and never see the image clear. Duskbloods zeroes its upscaler
+        // scratch arena (1536x1408 RGBA16F at 0x819aaa0000) this way and relies on it for the
+        // tensors' padding rows; stale rows kept NaN alive and whitened the bottom of the image.
+        static constexpr std::array<f32, 4> zero_color{};
+        if (color_full_channels && !is_signed && clear_covers_render_area &&
+            clear_layers.covers_all_layers &&
+            std::memcmp(regs.clear_color.data(), zero_color.data(), sizeof(zero_color)) == 0) {
+            const auto [image, view_base] = texture_cache.ColorTargetImage(color_attachment);
+            if (image != nullptr && image->info.resources.levels == 1 &&
+                image->info.resources.layers == 1 && image->info.size.depth == 1 &&
+                render_area.width >= ((image->info.size.width * up_scale) >> down_shift) &&
+                render_area.height >= ((image->info.size.height * up_scale) >> down_shift)) {
+                std::scoped_lock buffer_lock{buffer_cache.mutex};
+                buffer_cache.DMAClear(image->gpu_addr, image->guest_size_bytes / sizeof(u32), 0);
+            }
         }
     }
 

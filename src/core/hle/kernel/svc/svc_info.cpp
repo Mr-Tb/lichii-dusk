@@ -3,8 +3,6 @@
 
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include <cstdlib>
-
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/kernel/k_memory_manager.h"
