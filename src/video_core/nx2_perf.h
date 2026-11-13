@@ -78,7 +78,7 @@ inline bool Enabled() {
 
 inline bool On(Opt opt) {
     static const unsigned off = [] {
-        const auto bit = [](Opt opt) { return 1U << static_cast<unsigned>(opt); };
+        const auto bit = [](Opt option) { return 1U << static_cast<unsigned>(option); };
         const auto names = [](const char* variable) {
             unsigned bits = 0;
             std::string_view list = std::getenv(variable) ? std::getenv(variable) : "";
@@ -99,8 +99,6 @@ inline bool On(Opt opt) {
             }
             return bits;
         };
-        // Duskbloods build: bounds (now also MaxContinuousRange / GetSubmappedRange), clean_words
-        // and front_sleep are on by default; verified exact with EDEN_NX2_PERF_VERIFY=1.
         const unsigned default_off = bit(Opt::FramesAhead) | bit(Opt::IndexRebind) |
                                      bit(Opt::SubmitBudget) | bit(Opt::FenceFlush) |
                                      bit(Opt::FragmentBarrier) | bit(Opt::AsyncPipelines);
@@ -111,7 +109,8 @@ inline bool On(Opt opt) {
         }
         std::string state;
         for (size_t i = 0; i < opt_names.size(); ++i) {
-            state += fmt::format(" {}={}", opt_names[i], Enabled() && (mask >> i & 1) == 0 ? "on" : "off");
+            state += fmt::format(" {}={}", opt_names[i],
+                                 Enabled() && (mask >> i & 1) == 0 ? "on" : "off");
         }
         LOG_INFO(HW_GPU, "Nx2Perf:{}", state);
         return mask;

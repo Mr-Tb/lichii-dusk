@@ -3,13 +3,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 let
-  nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/tarball/nixos-25.05";
+  nixpkgs = fetchTarball "https://github.com/NixOS/nixpkgs/tarball/nixos-26.05";
   pkgs = import nixpkgs { config = {}; overlays = []; };
 in
 pkgs.mkShellNoCC {
   packages = with pkgs; [
     # essential programs
-    git cmake clang gnumake ninja patch jq pkg-config
+    git cmake clang gnumake ninja patch jq pkg-config autoPatchelfHook
     # libraries
     openssl boost fmt_11 nlohmann_json lz4 zlib zstd
     enet libopus vulkan-headers vulkan-utility-libraries
