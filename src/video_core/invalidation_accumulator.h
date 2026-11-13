@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -21,8 +20,9 @@ public:
     void Add(GPUVAddr address, size_t size) noexcept {
         auto const end_address = start_address + accumulated_size;
         if (!(address >= start_address && address + size <= end_address)) {
-            size = ((address + size + atomicity_size_mask) & atomicity_mask) - address;
-            address = address & atomicity_mask;
+            const GPUVAddr first_block = address & atomicity_mask;
+            size = ((address + size + atomicity_size_mask) & atomicity_mask) - first_block;
+            address = first_block;
             if (start_address == 0) {
                 start_address = address;
                 accumulated_size = size;
@@ -52,6 +52,9 @@ public:
     }
 
 private:
+    // A range runs from the start of the first 32-byte block a write touches to the end of the
+    // last one. The size used to be taken before the address was aligned down, so a write past
+    // its block's start got a range ending short of it (a lone word at 0x54 gave [0x40, 0x4c)).
     static constexpr size_t atomicity_bits = 5;
     static constexpr size_t atomicity_size = 1ULL << atomicity_bits;
     static constexpr size_t atomicity_size_mask = atomicity_size - 1;

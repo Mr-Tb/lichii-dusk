@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <thread>
 
 #include <ranges>
 #include "common/settings.h"
+#include "video_core/nx2.h"
+#include "video_core/nx2_profile.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
@@ -69,11 +70,15 @@ void MasterSemaphore::Refresh() {
     do {
         this_tick = gpu_tick.load(std::memory_order_acquire);
         counter = semaphore.GetCounter();
-        if (counter < this_tick) {
+        // Unchanged: no store, which would take the cache line from the threads reading it.
+        if (counter <= this_tick) {
             return;
         }
     } while (!gpu_tick.compare_exchange_weak(this_tick, counter, std::memory_order_release,
                                              std::memory_order_relaxed));
+    if (counter > this_tick) {
+        Tegra::Nx2PendingWake::Get().OnGpuTick(counter);
+    }
 }
 
 void MasterSemaphore::Wait(u64 tick) {
@@ -83,6 +88,7 @@ void MasterSemaphore::Wait(u64 tick) {
             return;
         }
 
+        const VideoCommon::Nx2Profile::Scope scope{VideoCommon::Nx2Profile::Zone::GpuWait};
         u64 last_tick = gpu_tick.load(std::memory_order_relaxed);
         while (gpu_tick.load(std::memory_order_acquire) < tick) {
             gpu_tick.wait(last_tick, std::memory_order_acquire);
@@ -104,6 +110,7 @@ void MasterSemaphore::Wait(u64 tick) {
     }
 
     // If none of the above is hit, fallback to a regular wait
+    const VideoCommon::Nx2Profile::Scope scope{VideoCommon::Nx2Profile::Zone::GpuWait};
     try {
         while (!semaphore.Wait(tick)) {
         }
@@ -119,6 +126,7 @@ void MasterSemaphore::Wait(u64 tick) {
 VkResult MasterSemaphore::SubmitQueue(vk::CommandBuffer& cmdbuf, vk::CommandBuffer& upload_cmdbuf,
                                       VkSemaphore signal_semaphore, VkSemaphore wait_semaphore,
                                       u64 host_tick) {
+    const VideoCommon::Nx2Profile::Scope scope{VideoCommon::Nx2Profile::Zone::QueueSubmit};
     if (semaphore) {
         return SubmitQueueTimeline(cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore,
                                    host_tick);
@@ -360,6 +368,7 @@ void MasterSemaphore::WaitThread(std::stop_token token) {
             gpu_tick.store(host_tick, std::memory_order_release);
         }
         gpu_tick.notify_one();
+        Tegra::Nx2PendingWake::Get().OnGpuTick(host_tick);
     }
 }
 

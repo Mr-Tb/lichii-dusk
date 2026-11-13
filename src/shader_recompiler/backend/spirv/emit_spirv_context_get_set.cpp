@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <bit>
@@ -48,6 +47,9 @@ std::optional<OutAttr> OutputAttrPointer(EmitContext& ctx, IR::Attribute attr) {
         const u32 index{IR::GenericAttributeIndex(attr)};
         const u32 element{IR::GenericAttributeElement(attr)};
         const GenericElementInfo& info{ctx.output_generics.at(index).at(element)};
+        if (!Sirit::ValidId(info.id)) {
+            return std::nullopt; // output pruned, nothing downstream reads it
+        }
         if (info.num_components == 1) {
             return info.id;
         } else {
@@ -314,7 +316,15 @@ Id EmitGetAttribute(EmitContext& ctx, IR::Attribute attr, Id vertex) {
         }
         const Id pointer{
             AttrPointer(ctx, generic.pointer_type, vertex, generic.id, ctx.Const(element))};
-        const Id value{ctx.OpLoad(generic.component_type, pointer)};
+        Id value{ctx.OpLoad(generic.component_type, pointer)};
+        if (ctx.stage == Stage::Fragment && ctx.noperspective_as_smooth_inputs[index]) {
+            // Written times Position.w and interpolated perspective-correct: undo with 1/w.
+            // Only float inputs are marked, and DefineInputs forces FragCoord for them.
+            ASSERT(generic.load_op == InputGenericLoadOp::None && ValidId(ctx.input_position));
+            const Id frag_w{ctx.OpLoad(
+                ctx.F32[1], ctx.OpAccessChain(ctx.input_f32, ctx.input_position, ctx.Const(3u)))};
+            value = ctx.OpFMul(ctx.F32[1], value, frag_w);
+        }
         return [&ctx, generic, value]() {
             switch (generic.load_op) {
             case InputGenericLoadOp::Bitcast:
@@ -422,13 +432,6 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, [[maybe_un
         value = ctx.OpBitcast(output->type, value);
     }
 
-    static constexpr IR::Attribute cd0 = IR::Attribute::ClipDistance0;
-    static constexpr IR::Attribute cd7 = IR::Attribute::ClipDistance7;
-
-    if (attr >= cd0 && attr <= cd7) {
-        const u32 idx = (u32) attr - (u32) cd0;
-        clip_distance_written.set(idx);
-    }
     ctx.OpStore(output->pointer, value);
 }
 

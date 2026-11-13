@@ -2,11 +2,19 @@
 # SPDX-FileCopyrightText: Copyright 2025 Eden Emulator Project
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# SPDX-FileCopyrightText: 2018 yuzu Emulator Project
 # SPDX-License-Identifier: GPL-2.0-or-later
 -->
 
-# Lichii for The Duskbloods (Network Test)
+<h2 align="center">Lichii for The Duskbloods (Network Test)</h2>
+
+<h2 align="center">⚠️ Lichii has no official website ⚠️</h2>
+
+> [!CAUTION]
+> **Lichii has no official website.** The only site run by the upstream project is the **game compatibility website, [lichii.zortos.me](https://lichii.zortos.me)**, for compatibility reports only. Other "Lichii" websites (such as lichii.org) are not affiliated with this project and may be unsafe ([#545](https://github.com/zortos293/Lichii/issues/545)).
+
+<p align="center">
+  <img src="dist/branding/lichii_icon_with_logo.png" alt="Lichii" width="600">
+</p>
 
 <p align="center"><b>Choose your language / اختر اللغة</b></p>
 
@@ -16,6 +24,8 @@
 
 **This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, build 117), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with an NVIDIA GPU and an Intel CPU.**
 It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game.
+
+Visit the [Lichii game compatibility website](https://lichii.zortos.me) to find games and compare community compatibility reports.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
 
@@ -74,6 +84,8 @@ Steps:
 5. **Play:** run `Play.Duskbloods.exe` and press **Play**. Always start the game through the launcher: started directly, the online check fails.
 
 The first minutes stutter while shaders compile; this improves with each session.
+
+See the [build guide](docs/Build.md), [user documentation](docs/user/README.md) and [coding guidelines](docs/Coding.md). Some inherited documentation and internal build target names still use upstream names. The GUI build target is `lichii`; its output is `lichii.exe` on Windows and `lichii` on other desktop platforms.
 
 ## Recommended settings (already set in the zip)
 

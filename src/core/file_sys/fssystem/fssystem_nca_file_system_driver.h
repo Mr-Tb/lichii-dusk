@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -93,8 +92,8 @@ constexpr inline s32 GetKeyTypeValue(u8 key_index, u8 key_generation) {
 }
 
 class NcaReader {
-    YUZU_NON_COPYABLE(NcaReader);
-    YUZU_NON_MOVEABLE(NcaReader);
+    LICHII_NON_COPYABLE(NcaReader);
+    LICHII_NON_MOVEABLE(NcaReader);
 
 public:
     NcaReader();
@@ -159,8 +158,8 @@ private:
 };
 
 class NcaFsHeaderReader {
-    YUZU_NON_COPYABLE(NcaFsHeaderReader);
-    YUZU_NON_MOVEABLE(NcaFsHeaderReader);
+    LICHII_NON_COPYABLE(NcaFsHeaderReader);
+    LICHII_NON_MOVEABLE(NcaFsHeaderReader);
 
 public:
     NcaFsHeaderReader() : m_fs_index(-1) {
@@ -212,8 +211,8 @@ private:
 };
 
 class NcaFileSystemDriver {
-    YUZU_NON_COPYABLE(NcaFileSystemDriver);
-    YUZU_NON_MOVEABLE(NcaFileSystemDriver);
+    LICHII_NON_COPYABLE(NcaFileSystemDriver);
+    LICHII_NON_MOVEABLE(NcaFileSystemDriver);
 
 public:
     struct StorageContext {
@@ -329,6 +328,7 @@ private:
                                  VirtualFile meta_storage, const NcaPatchInfo& patch_info);
 
     Result CreatePatchMetaStorage(VirtualFile* out_aes_ctr_ex_meta, VirtualFile* out_indirect_meta,
+                                  NcaFsHeader::EncryptionType encryption_type,
                                   VirtualFile* out_verification, VirtualFile base_storage,
                                   s64 offset, const NcaAesCtrUpperIv& upper_iv,
                                   const NcaPatchInfo& patch_info,

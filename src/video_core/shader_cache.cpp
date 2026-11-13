@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
@@ -24,6 +23,7 @@
 #include "shader_recompiler/object_pool.h"
 #include "video_core/control/channel_state.h"
 #include "video_core/dirty_flags.h"
+#include "video_core/nx2_fast_draw.h"
 #include "video_core/dlss_contract.h"
 #include "video_core/fire_emblem_upscale.h"
 #include "video_core/engines/kepler_compute.h"
@@ -31,7 +31,10 @@
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/memory_manager.h"
 #include "video_core/nx2_debug_control.h"
+#include "video_core/nx2_profile.h"
 #include "video_core/shader_cache.h"
+#include "video_core/shader_cache_v2/cache.h"
+#include "video_core/shader_cache_v2/records.h"
 #include "video_core/shader_environment.h"
 #include "video_core/texture_cache/util.h"
 
@@ -117,9 +120,11 @@ u64 ShaderCache::MeshStateHash() const {
 
 bool ShaderCache::RefreshStages(std::array<u64, 6>& unique_hashes) try {
     auto& dirty{maxwell3d->dirty.flags};
-    if (!dirty[VideoCommon::Dirty::Shaders]) {
+    const u64 removals{removal_serial.load(std::memory_order_acquire)};
+    if (!dirty[VideoCommon::Dirty::Shaders] && removals == seen_removal_serial) {
         return last_shaders_valid;
     }
+    seen_removal_serial = removals;
     dirty[VideoCommon::Dirty::Shaders] = false;
 
     const GPUVAddr base_addr{maxwell3d->regs.program_region.Address()};
@@ -165,7 +170,9 @@ bool ShaderCache::RefreshStages(std::array<u64, 6>& unique_hashes) try {
                 // Native programs are lowered while the environment is built (once: the
                 // ShaderInfo keeps the result for the pipeline's environments).
                 RethrowIfRejected(*cpu_shader_addr);
-                GraphicsEnvironment env{*maxwell3d, *gpu_memory, program, native ? shader_addr : base_addr, start_address};
+                const Nx2Profile::Scope profile_scope{Nx2Profile::Zone::ShaderCapture};
+                GraphicsEnvironment env{*maxwell3d, *gpu_memory, program, native ? shader_addr : base_addr, start_address,
+                                        {}, shader_cache_v2};
                 shader_info = MakeShaderInfo(env, *cpu_shader_addr);
             } catch (const Shader::Exception&) {
                 RememberRejection(*cpu_shader_addr);
@@ -278,7 +285,9 @@ const ShaderInfo* ShaderCache::ComputeShader() {
     } else {
         try {
             RethrowIfRejected(*cpu_shader_addr);
-            ComputeEnvironment env{*kepler_compute, *gpu_memory, program_base, qmd.program_start};
+            const Nx2Profile::Scope profile_scope{Nx2Profile::Zone::ShaderCapture};
+            ComputeEnvironment env{*kepler_compute, *gpu_memory, program_base, qmd.program_start, {},
+                                   shader_cache_v2};
             shader = MakeShaderInfo(env, *cpu_shader_addr);
         } catch (const Shader::Ampere::TrapGuardError&) {
             // Constants can become valid on the next dispatch; do not cache this rejection.
@@ -373,8 +382,8 @@ void ShaderCache::Register(std::unique_ptr<ShaderInfo> data, VAddr addr, size_t 
     Entry* const entry = NewEntry(addr, addr_end, data.get());
     page_filter.Mark(addr, size);
 
-    const u64 page_end = (addr_end + YUZU_PAGESIZE - 1) >> YUZU_PAGEBITS;
-    for (u64 page = addr >> YUZU_PAGEBITS; page < page_end; ++page) {
+    const u64 page_end = (addr_end + LICHII_PAGESIZE - 1) >> LICHII_PAGEBITS;
+    for (u64 page = addr >> LICHII_PAGEBITS; page < page_end; ++page) {
         invalidation_cache[page].push_back(entry);
     }
 
@@ -394,8 +403,8 @@ void ShaderCache::InvalidatePagesInRegion(VAddr addr, size_t size) {
             return rejected.first >= addr && rejected.first < addr_end;
         });
     }
-    const u64 page_end = (addr_end + YUZU_PAGESIZE - 1) >> YUZU_PAGEBITS;
-    for (u64 page = addr >> YUZU_PAGEBITS; page < page_end; ++page) {
+    const u64 page_end = (addr_end + LICHII_PAGESIZE - 1) >> LICHII_PAGEBITS;
+    for (u64 page = addr >> LICHII_PAGEBITS; page < page_end; ++page) {
         auto it = invalidation_cache.find(page);
         if (it == invalidation_cache.end()) {
             continue;
@@ -424,6 +433,8 @@ void ShaderCache::RemovePendingShaders() {
     marked_for_removal.clear();
 
     if (!removed_shaders.empty()) {
+        Nx2FastDraw::Break(Nx2FastDraw::Reason::Invalidation);
+        removal_serial.fetch_add(1, std::memory_order_release);
         if (removed_shaders.size() > 16) {
             std::ranges::sort(removed_shaders, std::less<ShaderInfo*>{});
             std::erase_if(storage, [&removed_shaders](const std::unique_ptr<ShaderInfo>& shader) {
@@ -454,8 +465,8 @@ void ShaderCache::InvalidatePageEntries(std::vector<Entry*>& entries, VAddr addr
 }
 
 void ShaderCache::RemoveEntryFromInvalidationCache(const Entry* entry) {
-    const u64 page_end = (entry->addr_end + YUZU_PAGESIZE - 1) >> YUZU_PAGEBITS;
-    for (u64 page = entry->addr_start >> YUZU_PAGEBITS; page < page_end; ++page) {
+    const u64 page_end = (entry->addr_end + LICHII_PAGESIZE - 1) >> LICHII_PAGEBITS;
+    for (u64 page = entry->addr_start >> LICHII_PAGEBITS; page < page_end; ++page) {
         const auto entries_it = invalidation_cache.find(page);
         ASSERT(entries_it != invalidation_cache.end());
         std::vector<Entry*>& entries = entries_it->second;
@@ -499,6 +510,9 @@ const ShaderInfo* ShaderCache::MakeShaderInfo(GenericEnvironment& env, VAddr cpu
         info->size_bytes = env.ReadSizeBytes();
     }
     info->lowered_native = env.LoweredNative();
+    if (const auto record = env.TakeProgramRecord(); record && shader_cache_v2) {
+        shader_cache_v2->RecordProgram(*record);
+    }
     const size_t size_bytes{env.SourceSizeBytes() ? env.SourceSizeBytes() : info->size_bytes};
     const ShaderInfo* const result{info.get()};
     Register(std::move(info), cpu_addr, size_bytes);

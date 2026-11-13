@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <vector>
@@ -128,7 +128,11 @@ struct ImageBase {
     VAddr cpu_addr = 0;
     VAddr cpu_addr_end = 0;
 
+    /// Set through SetModificationTick.
     u64 modification_tick = 0;
+    /// At least the newest modification_tick among aliased_images (raised when an alias's tick is
+    /// set or an alias is added): SynchronizeAliases has nothing to do while it is not newer.
+    u64 newest_alias_tick = 0;
     size_t lru_index = SIZE_MAX;
 
     std::array<u32, MAX_MIP_LEVELS> mip_level_offsets{};
@@ -171,5 +175,15 @@ struct ImageAllocBase {
 };
 
 bool AddImageAlias(ImageBase& lhs, ImageBase& rhs, ImageId lhs_id, ImageId rhs_id);
+
+/// Sets an image's modification tick and raises its aliases' newest_alias_tick to it.
+template <typename Images>
+void SetModificationTick(Images& images, ImageBase& image, u64 tick) {
+    image.modification_tick = tick;
+    for (const AliasedImage& alias : image.aliased_images) {
+        u64& newest = images[alias.id].newest_alias_tick;
+        newest = (std::max)(newest, tick);
+    }
+}
 
 } // namespace VideoCommon

@@ -24,6 +24,7 @@
 #include "common/settings.h"
 #include "common/stb.h"
 #include "core/core.h"
+#include "core/core_timing.h"
 #include "core/debugger/nx2_debug_server.h"
 #include "core/debugger/nx2_debug_tools.h"
 #include "core/frontend/framebuffer_layout.h"
@@ -486,6 +487,25 @@ json SampleThreads(ToolState& state, const json& params) {
     return {{"file", path.generic_string()}, {"report", std::move(report)}};
 }
 
+// Lifts or restores the speed limit (test scripts boot through the logos and menus unlimited).
+json SpeedLimit(ToolState&, const json& params) {
+    auto& setting = Settings::values.use_speed_limit;
+    const bool previous = setting.GetValue();
+    if (params.contains("on")) {
+        setting.SetValue(params.at("on").get<bool>());
+    }
+    return {{"previous", previous}, {"on", setting.GetValue()}};
+}
+
+json HostTiming(ToolState& state, const json& params) {
+    auto& stats = state.system.CoreTiming().host_wait_stats;
+    const bool previous = stats.load();
+    if (params.contains("stats")) {
+        stats = params.at("stats").get<bool>();
+    }
+    return {{"previous", previous}, {"stats", stats.load()}};
+}
+
 json ReadMemory(ToolState& state, const json& params) {
     const u64 address = AddressParam(params, "address");
     const u64 size = ReadSize(params, address);
@@ -680,6 +700,8 @@ Handlers MakeHandlers(const std::shared_ptr<ToolState>& state) {
         {"capture_frame", handler(CaptureFrame)},
         {"reject_shaders", handler(RejectShaders)},
         {"sample", handler(SampleThreads)},
+        {"speed_limit", handler(SpeedLimit)},
+        {"host_timing", handler(HostTiming)},
         {"read_memory", handler(ReadMemory)},
         {"search_memory", handler(SearchMemory)},
         {"read_gpu_memory", handler(ReadGpuMemory)},
@@ -777,8 +799,8 @@ json FormatMemory(std::span<const u8> bytes, std::string_view as) {
 std::optional<u64> ReadGuestMemory(Memory::Memory& memory, u64 address, std::span<u8> out) {
     for (size_t offset = 0; offset < out.size();) {
         const u64 current = address + offset;
-        const size_t length = (std::min)(static_cast<size_t>(Memory::YUZU_PAGESIZE -
-                                                             (current & Memory::YUZU_PAGEMASK)),
+        const size_t length = (std::min)(static_cast<size_t>(Memory::LICHII_PAGESIZE -
+                                                             (current & Memory::LICHII_PAGEMASK)),
                                          out.size() - offset);
         const u8* const source = GuestByte(memory, current);
         if (source == nullptr) {
@@ -796,14 +818,14 @@ GuestSearch SearchGuestMemory(Memory::Memory& memory, std::span<const u8> patter
     GuestSearch search{.hits = {}, .next = end, .complete = true, .scanned = 0};
     // The bytes of a run of mapped pages that a match starting there could still need.
     std::vector<u8> window;
-    window.reserve(Memory::YUZU_PAGESIZE + pattern.size());
+    window.reserve(Memory::LICHII_PAGESIZE + pattern.size());
     for (u64 address = start; address < end;) {
         if (std::chrono::steady_clock::now() >= deadline) {
             search.next = address - window.size();
             search.complete = false;
             return search;
         }
-        const u64 page_end = (std::min)((address | Memory::YUZU_PAGEMASK) + 1, end);
+        const u64 page_end = (std::min)((address | Memory::LICHII_PAGEMASK) + 1, end);
         const u8* const source = GuestByte(memory, address);
         if (source == nullptr) {
             window.clear();

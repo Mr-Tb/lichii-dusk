@@ -11,8 +11,18 @@
 #include "core/core.h"
 #include "core/frontend/emu_window.h"
 #include "core/frontend/graphics_context.h"
+#include "core/gpu_dirty_memory_manager.h"
 #include "video_core/host1x/gpu_device_memory_manager.h"
 #include "video_core/host1x/host1x.h"
+#include "video_core/nx2_async_readback.h"
+#include "video_core/nx2_backx.h"
+#include "video_core/nx2_cmdpage_diag.h"
+#include "video_core/nx2_download_trace.h"
+#include "video_core/nx2_list_grid.h"
+#include "video_core/nx2_list_macro_trace.h"
+#include "video_core/nx2_perf.h"
+#include "video_core/nx2_profile.h"
+#include "video_core/nx2_stutter_trace.h"
 #include "video_core/renderer_base.h"
 #include "video_core/renderer_null/renderer_null.h"
 #ifdef HAS_OPENGL
@@ -48,6 +58,16 @@ namespace VideoCore {
 /// @brief Creates an emulated GPU instance using the given system context.
 void CreateGPU(std::optional<Tegra::GPU>& gpu, Core::Frontend::EmuWindow& emu_window, Core::System& system) {
     Settings::UpdateRescalingInfo();
+    VideoCommon::Nx2Profile::ReadSwitch();
+    VideoCommon::StutterTrace::StartSession();
+    Tegra::Nx2CmdPageDiag::ReadSwitch();
+    VideoCommon::Nx2DownloadTrace::ReadSwitch();
+    VideoCommon::ListMacroTrace::ReadSwitch();
+    Tegra::Nx2ListGrid::ReadSwitch();
+    VideoCore::AsyncReadback::ReadSwitch();
+    VideoCommon::Nx2Perf::ReadSwitch();
+    VideoCommon::BackX::ReadSwitch();
+    Core::GPUDirtyMemoryManager::count_collects = VideoCommon::BackX::g_verify;
 
     const auto nvdec_value = Settings::values.nvdec_emulation.GetValue();
     const bool use_nvdec = nvdec_value != Settings::NvdecEmulation::Off;

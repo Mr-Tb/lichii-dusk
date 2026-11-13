@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2024 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -43,6 +42,7 @@ private:
     Result SetRenderingTimeLimit(u32 rendering_time_limit);
     Result GetRenderingTimeLimit(Out<u32> out_rendering_time_limit);
     Result SetVoiceDropParameter(f32 voice_drop_parameter);
+    Result SetAsyncMemoryPoolControlEnabled(bool enabled);
     Result GetVoiceDropParameter(Out<f32> out_voice_drop_parameter);
 
     KernelHelpers::ServiceContext service_context;

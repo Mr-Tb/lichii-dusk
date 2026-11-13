@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2024 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "core/hle/service/audio/audio_renderer.h"
@@ -35,6 +34,7 @@ IAudioRenderer::IAudioRenderer(Core::System& system_, std::shared_ptr<Manager> m
         {11, nullptr, "ExecuteAudioRendererRendering"}, //3.0.0+
         {12, D<&IAudioRenderer::SetVoiceDropParameter>, "SetVoiceDropParameter"}, //15.0.0+
         {13, D<&IAudioRenderer::GetVoiceDropParameter>, "GetVoiceDropParameter"}, //15.0.0+
+        {14, D<&IAudioRenderer::SetAsyncMemoryPoolControlEnabled>, "SetAsyncMemoryPoolControlEnabled"}, //23.0.0+
     };
     // clang-format on
     RegisterHandlers(functions);
@@ -124,6 +124,11 @@ Result IAudioRenderer::SetRenderingTimeLimit(u32 rendering_time_limit) {
 Result IAudioRenderer::GetRenderingTimeLimit(Out<u32> out_rendering_time_limit) {
     LOG_DEBUG(Service_Audio, "called");
     *out_rendering_time_limit = impl->GetSystem().GetRenderingTimeLimit();
+    R_SUCCEED();
+}
+
+Result IAudioRenderer::SetAsyncMemoryPoolControlEnabled(bool enabled) {
+    LOG_INFO(Service_Audio, "SetAsyncMemoryPoolControlEnabled enabled={}", enabled);
     R_SUCCEED();
 }
 

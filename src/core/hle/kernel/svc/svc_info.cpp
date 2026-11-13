@@ -1,22 +1,28 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2023 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
-#include <cstdlib>
-#include <string_view>
 
 #include "core/core.h"
 #include "core/core_timing.h"
 #include "core/hle/kernel/k_memory_manager.h"
 #include "core/hle/kernel/k_process.h"
 #include "core/hle/kernel/k_resource_limit.h"
+#include "core/hle/kernel/k_system_control.h"
 #include "core/hle/kernel/svc.h"
 #include "core/hle/kernel/svc_results.h"
 #include "core/hle/kernel/svc_version.h"
 
 namespace Kernel::Svc {
+
+namespace {
+// The application's memory totals leave out the Switch 2 remote memory its pool also backs; other
+// processes, and totals smaller than the allowance, are reported as they are.
+u64 WithoutRemoteMemory(const KProcess& process, u64 total) {
+    const u64 remote = KSystemControl::Nx2RemoteMemorySize();
+    return process.IsApplication() && total >= remote ? total - remote : total;
+}
+} // Anonymous namespace
 
 /// Gets system/memory information for the current process
 Result GetInfo(Core::System& system, u64* result, InfoType info_id_type, Handle handle, u64 info_sub_id) {
@@ -89,15 +95,11 @@ Result GetInfo(Core::System& system, u64* result, InfoType info_id_type, Handle 
             R_SUCCEED();
         }
         case InfoType::Nx2RemoteMemorySize:
-            if (const char* probe = std::getenv("EDEN_NX2_APP_POOL_PROBE");
-                probe != nullptr && std::string_view{probe} == "1152") {
-                *result = 512ULL * 1024 * 1024;
-                LOG_WARNING(Kernel_SVC, "Experimental remote memory size: {:#x}", *result);
-                R_SUCCEED();
-            }
-            // Unknown real value; nothing backs it yet.
-            *result = 0;
-            LOG_WARNING(Kernel_SVC, "(STUBBED) Switch 2 InfoType 31 (remote memory size), returning 0");
+            // Unknown real value; the application pool backs it (see Nx2RemoteMemorySize). The
+            // Duskbloods network test crashes on a null pointer if it is 0 (playDB-CNT issue 2).
+            *result = KSystemControl::Nx2RemoteMemorySize();
+            LOG_WARNING(Kernel_SVC, "(STUBBED) Switch 2 InfoType 31 (remote memory size), returning {:#x}",
+                        *result);
             R_SUCCEED();
         case InfoType::Nx2RemoteMemoryUsed:
             *result = 0;
@@ -106,7 +108,7 @@ Result GetInfo(Core::System& system, u64* result, InfoType info_id_type, Handle 
         case InfoType::Nx2VammSize:
             // A page granule: the SDK checks module addresses/sizes against (value - 1) and
             // VAMM maps one granule up front. 4 KiB matches what Switch 1 kernels use.
-            *result = Core::Memory::YUZU_PAGESIZE;
+            *result = Core::Memory::LICHII_PAGESIZE;
             LOG_WARNING(Kernel_SVC, "(STUBBED) Switch 2 InfoType 33, returning {:#x}", *result);
             R_SUCCEED();
         case InfoType::AslrRegionAddress:
@@ -122,7 +124,8 @@ Result GetInfo(Core::System& system, u64* result, InfoType info_id_type, Handle 
             *result = process->GetPageTable().GetStackRegionSize();
             R_SUCCEED();
         case InfoType::TotalMemorySize:
-            *result = process->GetTotalUserPhysicalMemorySize(system.Kernel());
+            *result = WithoutRemoteMemory(*process,
+                                          process->GetTotalUserPhysicalMemorySize(system.Kernel()));
             R_SUCCEED();
         case InfoType::UsedMemorySize:
             *result = process->GetUsedUserPhysicalMemorySize(system.Kernel());
@@ -140,7 +143,8 @@ Result GetInfo(Core::System& system, u64* result, InfoType info_id_type, Handle 
             *result = GetInteger(process->GetProcessLocalRegionAddress());
             R_SUCCEED();
         case InfoType::TotalNonSystemMemorySize:
-            *result = process->GetTotalNonSystemUserPhysicalMemorySize(system.Kernel());
+            *result = WithoutRemoteMemory(
+                *process, process->GetTotalNonSystemUserPhysicalMemorySize(system.Kernel()));
             R_SUCCEED();
         case InfoType::UsedNonSystemMemorySize:
             *result = process->GetUsedNonSystemUserPhysicalMemorySize(system.Kernel());

@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -113,6 +112,9 @@ public:
         PackedGPUVAddr address;
         u32 payload;
     };
+    /// The methods of Regs::semaphore (address high and low, payload) and Regs::launch_dma.
+    static constexpr u32 SemaphoreMethod = 0x240 / sizeof(u32);
+    static constexpr u32 LaunchDmaMethod = 0x300 / sizeof(u32);
     static_assert(sizeof(Semaphore) == 12);
 
     struct RenderEnable {
@@ -328,6 +330,8 @@ private:
     ASSERT_REG_POSITION(src_params, 0x728);
     ASSERT_REG_POSITION(pm_trigger_end, 0x1114);
 #undef ASSERT_REG_POSITION
+    static_assert(SemaphoreMethod * sizeof(u32) == offsetof(Regs, semaphore));
+    static_assert(LaunchDmaMethod * sizeof(u32) == offsetof(Regs, launch_dma));
 };
 
 } // namespace Tegra::Engines

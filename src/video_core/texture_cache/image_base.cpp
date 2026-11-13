@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
@@ -253,6 +252,8 @@ bool AddImageAlias(ImageBase& lhs, ImageBase& rhs, ImageId lhs_id, ImageId rhs_i
     }
     lhs.aliased_images.push_back(std::move(lhs_alias));
     rhs.aliased_images.push_back(std::move(rhs_alias));
+    lhs.newest_alias_tick = (std::max)(lhs.newest_alias_tick, rhs.modification_tick);
+    rhs.newest_alias_tick = (std::max)(rhs.newest_alias_tick, lhs.modification_tick);
     lhs.flags &= ~ImageFlagBits::IsRescalable;
     rhs.flags &= ~ImageFlagBits::IsRescalable;
     return true;

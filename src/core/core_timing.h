@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2020 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -147,6 +146,9 @@ public:
 
     void Reset();
 
+    /// Waits on `event` until next_time, sleeping in the OS for most of it.
+    void WaitForEvent(s64 next_time);
+
     using heap_t = boost::heap::fibonacci_heap<CoreTiming::Event, boost::heap::compare<std::greater<>>>;
     heap_t event_queue;
     s64 global_timer = 0;
@@ -169,6 +171,9 @@ public:
     std::atomic<bool> wait_set{};
     std::atomic<bool> has_started{};
     bool is_multicore{};
+    /// Logs the timer thread's waits once a second (EDEN_NX2_HOSTTIMING_STATS=1, or the debug
+    /// server's host_timing).
+    std::atomic<bool> host_wait_stats{};
 };
 
 /// Creates a core timing event with the given name and callback.

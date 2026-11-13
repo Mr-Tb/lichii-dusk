@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -89,6 +88,22 @@ private:
     ComputePassDescriptorQueue& compute_pass_descriptor_queue;
 };
 
+/// The dispatch arguments of a kept command list's grid words (nx2_list_grid.h).
+class ListGridArgumentsPass final : public ComputePass {
+public:
+    explicit ListGridArgumentsPass(const Device& device_, Scheduler& scheduler_,
+                                   DescriptorPool& descriptor_pool_,
+                                   ComputePassDescriptorQueue& compute_pass_descriptor_queue_);
+
+    /// Writes the arguments of the three words at word `words` of `buffer` (`size` bytes) to
+    /// word `arguments`, after the transfer that wrote the words (verify mode reads them back).
+    void Convert(VkBuffer buffer, VkDeviceSize size, u32 words, u32 arguments);
+
+private:
+    Scheduler& scheduler;
+    ComputePassDescriptorQueue& compute_pass_descriptor_queue;
+};
+
 class QuadIndexedPass final : public ComputePass {
 public:
     explicit QuadIndexedPass(const Device& device_, Scheduler& scheduler_,
@@ -162,6 +177,7 @@ public:
         /// layer_view(host level, layer).
         std::span<const u32> layers{};
         std::function<VkImageView(s32 host_level, u32 layer)> layer_view{};
+        u32 levels{~u32{0}};
     };
 
     /// Decodes `info`'s ASTC data in `map` into `target`. `skip` leading levels are absent on the

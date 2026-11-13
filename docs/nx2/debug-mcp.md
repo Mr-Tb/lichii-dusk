@@ -87,7 +87,7 @@ Three kinds of work, three places:
    is safe.
 3. **Existing renderer hooks.** The screenshot uses `RendererBase::RequestScreenshot`
    (`src/video_core/renderer_base.cpp:38`), the path the Qt screenshot hotkey uses
-   (`src/yuzu/bootmanager.cpp:819`). It is already safe to call from another thread, and the
+   (`src/lichii/bootmanager.cpp:819`). It is already safe to call from another thread, and the
    renderer fills the buffer at the next present (`renderer_vulkan.cpp:350`).
 
 The server thread waits for rasterizer-thread work with a timeout (5 s for screenshots and
@@ -209,7 +209,18 @@ command. With `index: true`, the adapter runs that command itself. The adapter-o
 threads (default `GPU,GPUBack`) about 1000 times a second for `seconds` (default 10) and returns
 the self, self-and-caller and inclusive counts per function. The report and its folded stacks go
 to `samples-<session>-<n>.txt` in the dump directory. Windows only; the threads run slower while
-sampled, so read fps from a run without it.
+sampled, so read fps from a run without it. A stack ends at its first frame in generated code,
+shown as `(jit)`: a guest core thread (`CPUCore_*`) shows `(jit)` while it runs guest code and
+the host functions above `(jit)` while the JIT calls out.
+
+**`speed_limit`** `{on?}`. Lifts (`false`) or restores (`true`) the speed limit live and returns
+the `previous` and current `on` state, so a test script can boot through the logos and menus
+unlimited. Without `on` it only reports the state. Use it through `--call`; the MCP adapter does
+not list it.
+
+**`host_timing`** `{stats?}`. Turns the per-second `HostTiming wait` log line
+(`EDEN_NX2_HOSTTIMING_STATS`) on or off and returns the `previous` and current `stats` state.
+Read the lines with `log_tail` (`contains: "HostTiming wait"`).
 
 **`reject_shaders`** `{hashes?, reject?, timeout_s?}`. This is `EDEN_NX2_REJECT_HASH` at
 runtime: the same keys (native program key or shader hash) and the same effect. Pipeline
@@ -383,7 +394,7 @@ Live switch classification, from the switches in `src/`:
 
 The core cannot save state. There is no serialisation of the kernel, services, the dynarmic and
 NCE CPU state, or the GPU caches, and Eden and yuzu never had it. The `saveState` in
-`src/yuzu/main_window.cpp` is Qt window geometry. Adding save states is a project of its own,
+`src/lichii/main_window.cpp` is Qt window geometry. Adding save states is a project of its own,
 not a tool. The practical substitute is a reproduction script: phase 2 input sequences, recorded
 once (`EDEN_NX2_KEY_RECORD` already records keys in `eden-cli`) and replayed after boot.
 

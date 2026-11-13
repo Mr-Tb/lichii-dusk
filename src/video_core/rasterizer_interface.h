@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
-// SPDX-FileCopyrightText: Copyright 2018 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -44,8 +43,15 @@ enum class LoadCallbackStage {
     Prepare,
     Build,
     Complete,
+    /// The shader precache running before the game starts (programs built / total).
+    /// Last, so the values of the others stay as frontends that know only those expect.
+    Warm,
 };
 using DiskResourceLoadCallback = std::function<void(LoadCallbackStage, std::size_t, std::size_t)>;
+
+/// Set while the query cache signals the fence that writes a fence-flagged report, so the fence
+/// manager makes that fence even when it is empty (FenceManager::SignalFence).
+inline thread_local bool g_signaling_query_report_fence = false;
 
 class RasterizerInterface {
 public:
@@ -107,6 +113,24 @@ public:
     virtual void FlushRegion(DAddr addr, u64 size,
                              VideoCommon::CacheType which = VideoCommon::CacheType::All) = 0;
 
+    /// FlushRegion for a guest CPU read of the region (GPU::OnCPURead), on the GPU thread: a
+    /// cache may submit its downloads without waiting for the host GPU, for FinishRead to write.
+    virtual void FlushRegionForRead(DAddr addr, u64 size) {
+        FlushRegion(addr, size);
+    }
+
+    /// Writes to guest memory what FlushRegionForRead submitted over the region (and anything
+    /// submitted before it), waiting for the host GPU if it must. Any thread: the reading one
+    /// before it reads, and the GPU's side before it writes guest memory there.
+    virtual void FinishRead([[maybe_unused]] DAddr addr, [[maybe_unused]] u64 size) {}
+
+    /// A query result the query cache writes to guest memory later, at a fence or sync point.
+    /// When this returns true, FinishReport once it wrote or dropped it.
+    virtual bool NoteReportPending([[maybe_unused]] DAddr addr, [[maybe_unused]] u64 size) {
+        return false;
+    }
+    virtual void FinishReport([[maybe_unused]] DAddr addr, [[maybe_unused]] u64 size) {}
+
     /// Switch 2, from the GPU thread's front: where a GPU-written command list's words are.
     enum class GpuWrittenList {
         Unknown, ///< Neither: the caller drains, flushes the page and notes it synced
@@ -115,11 +139,22 @@ public:
         /// Draws write the page: ask again with `past_sync` once the split's back ran the work
         /// before the last host-level wait (GpuSplit::WaitForSync)
         NeedsSync,
+        /// Only with `pending_tick`: the copy is not done yet, `*pending_tick` is the host GPU
+        /// tick that completes it. Ask again once IsGpuTickDone(*pending_tick).
+        Pending,
     };
+    /// With `pending_tick`, a copy the GPU is still making returns Pending instead of waiting.
     virtual GpuWrittenList ReadGpuWrittenCommandList([[maybe_unused]] DAddr addr,
                                                      [[maybe_unused]] std::span<u8> out,
-                                                     [[maybe_unused]] bool past_sync) {
+                                                     [[maybe_unused]] bool past_sync,
+                                                     [[maybe_unused]] u64* pending_tick = nullptr) {
         return GpuWrittenList::Unknown;
+    }
+
+    /// Whether the host GPU passed `tick`, without waiting. Asks for deferred work to be
+    /// submitted when the tick is not submitted yet, so it completes.
+    virtual bool IsGpuTickDone([[maybe_unused]] u64 tick) {
+        return true;
     }
 
     /// Switch 2: the front flushed this command list page with the split drained.
@@ -129,6 +164,35 @@ public:
         for (const DAddr page : pages) {
             FlushRegion(page, 0x1000, VideoCommon::CacheType::BufferCache);
         }
+    }
+
+    /// Switch 2, list-fed grid macros (nx2_list_grid.h): whether the back keeps list words and
+    /// dispatches from them, so the front may take such lists without reading them.
+    [[nodiscard]] virtual bool Nx2ListGridSupported() const {
+        return false;
+    }
+    /// On the split's back, at the list's place in the stream: copies the three words at
+    /// `address` into a kept-words slot as `keep_id`. Verify mode: `real` are the words as the
+    /// front read them the old way for the macro `hash`, else empty.
+    virtual void Nx2KeepListWords([[maybe_unused]] u64 keep_id, [[maybe_unused]] GPUVAddr address,
+                                  [[maybe_unused]] u64 hash,
+                                  [[maybe_unused]] std::span<const u32> real) {}
+    /// On the split's back, before the inline write that carries it: the word at `device_addr`
+    /// will be the marker of word `index` of list `keep_id`, to be patched from its kept copy.
+    virtual void Nx2ExpectKeptWord([[maybe_unused]] DAddr device_addr,
+                                   [[maybe_unused]] u64 keep_id, [[maybe_unused]] u32 index) {}
+    /// On the split's back: the words kept as `keep_id`, after waiting for the host GPU's copy.
+    /// False if none are kept, or a later list took the slot.
+    [[nodiscard]] virtual bool Nx2ReadKeptListWords([[maybe_unused]] u64 keep_id,
+                                                    [[maybe_unused]] std::span<u32> words) {
+        return false;
+    }
+    /// On the split's back: the keep id of the list grid word `marker` at `device_addr` (in
+    /// guest memory) stands for, if the back patched that word from the list and still keeps it
+    /// (Nx2ListGrid::QmdWordList).
+    [[nodiscard]] virtual std::optional<u64> Nx2FindKeptWord([[maybe_unused]] DAddr device_addr,
+                                                             [[maybe_unused]] u32 marker) {
+        return std::nullopt;
     }
 
     /// Check if the the specified memory area requires flushing to CPU Memory.
@@ -143,6 +207,14 @@ public:
         return false;
     }
 
+    /// Any thread: whether the query cache holds reports that can still land in the range, as
+    /// FlushQueryResults writes them out or once their host results come in. Without a query
+    /// cache that can tell, assume so.
+    [[nodiscard]] virtual bool HoldsQueries([[maybe_unused]] DAddr addr,
+                                            [[maybe_unused]] u64 size) {
+        return true;
+    }
+
     /// Notify rasterizer that any caches of the specified region should be invalidated
     virtual void InvalidateRegion(DAddr addr, u64 size,
                                   VideoCommon::CacheType which = VideoCommon::CacheType::All) = 0;
@@ -152,11 +224,19 @@ public:
                                     [[maybe_unused]] VideoCommon::CacheType which) {}
 
     virtual void InnerInvalidation(std::span<const std::pair<DAddr, std::size_t>> sequences) {
-        if (!Settings::values.skip_cpu_inner_invalidation.GetValue()) {
-            for (const auto& [cpu_addr, size] : sequences) {
-                InvalidateRegion(cpu_addr, size);
-            }
+        // The skip keeps the texture cache: software engine writes reach images only here.
+        const auto which = Settings::values.skip_cpu_inner_invalidation.GetValue()
+                               ? VideoCommon::CacheType::TextureCache
+                               : VideoCommon::CacheType::All;
+        for (const auto& [cpu_addr, size] : sequences) {
+            InvalidateRegion(cpu_addr, size, which);
         }
+    }
+
+    /// InnerInvalidation of constant buffer data (MemoryManager::WriteConstantBufferData).
+    virtual void InvalidateConstantBufferData(
+        std::span<const std::pair<DAddr, std::size_t>> sequences) {
+        InnerInvalidation(sequences);
     }
 
     /// Notify rasterizer that any caches of the specified region are desync with guest
@@ -225,7 +305,8 @@ public:
         const Tegra::Engines::Fermi2D::Surface& src, const Tegra::Engines::Fermi2D::Surface& dst,
         const Tegra::Engines::Fermi2D::Surface& motion_vectors,
         const Tegra::Texture::TICEntry* depth, std::array<f32, 2> jitter,
-        std::array<f32, 2> motion_scale, bool use_history = true) {
+        std::array<f32, 2> motion_scale, bool use_history = true,
+        std::optional<std::array<u32, 2>> render_region = std::nullopt) {
         return false;
     }
 

@@ -23,6 +23,22 @@
 // way too, logs any difference and uses the old answer.
 namespace VideoCommon::Nx2Perf {
 
+[[nodiscard]] inline bool VerifySwitchSet() {
+    const char* value = std::getenv("EDEN_NX2_PERF_VERIFY");
+    return value != nullptr && value[0] == '1';
+}
+
+/// EDEN_NX2_PERF_VERIFY=1. A plain flag: the buffer cache, the memory tracker and the 3D engine
+/// check it on hot paths, and a function's static is checked for its initialization on every
+/// call (MSVC reads a thread-local for it).
+inline bool g_verify = VerifySwitchSet();
+
+/// Called by VideoCore::CreateGPU: static initialization runs before the frontend loads
+/// nx2_switches.txt, so a switch set only there takes effect from that point on.
+inline void ReadSwitch() {
+    g_verify = VerifySwitchSet();
+}
+
 enum class Opt : unsigned {
     Bounds,            ///< MaxContinuousRange / GetMemoryLayoutSize from map-time runs
     Method,            ///< Maxwell3D fast method dispatch on the back
@@ -62,7 +78,7 @@ inline bool Enabled() {
 
 inline bool On(Opt opt) {
     static const unsigned off = [] {
-        const auto bit = [](Opt opt) { return 1U << static_cast<unsigned>(opt); };
+        const auto bit = [](Opt option) { return 1U << static_cast<unsigned>(option); };
         const auto names = [](const char* variable) {
             unsigned bits = 0;
             std::string_view list = std::getenv(variable) ? std::getenv(variable) : "";
@@ -83,8 +99,6 @@ inline bool On(Opt opt) {
             }
             return bits;
         };
-        // Duskbloods build: bounds (now also MaxContinuousRange / GetSubmappedRange), clean_words
-        // and front_sleep are on by default; verified exact with EDEN_NX2_PERF_VERIFY=1.
         const unsigned default_off = bit(Opt::FramesAhead) | bit(Opt::IndexRebind) |
                                      bit(Opt::SubmitBudget) | bit(Opt::FenceFlush) |
                                      bit(Opt::FragmentBarrier) | bit(Opt::AsyncPipelines);
@@ -95,7 +109,8 @@ inline bool On(Opt opt) {
         }
         std::string state;
         for (size_t i = 0; i < opt_names.size(); ++i) {
-            state += fmt::format(" {}={}", opt_names[i], Enabled() && (mask >> i & 1) == 0 ? "on" : "off");
+            state += fmt::format(" {}={}", opt_names[i],
+                                 Enabled() && (mask >> i & 1) == 0 ? "on" : "off");
         }
         LOG_INFO(HW_GPU, "Nx2Perf:{}", state);
         return mask;
@@ -104,11 +119,7 @@ inline bool On(Opt opt) {
 }
 
 inline bool Verify() {
-    static const bool verify = [] {
-        const char* value = std::getenv("EDEN_NX2_PERF_VERIFY");
-        return value != nullptr && value[0] == '1';
-    }();
-    return verify;
+    return g_verify;
 }
 
 } // namespace VideoCommon::Nx2Perf
