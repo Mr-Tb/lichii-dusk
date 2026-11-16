@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -10,6 +11,8 @@
 #include <cstdlib>
 #include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 #include "common/logging.h"
 
@@ -151,6 +154,9 @@ struct LiveState {
     int dlss_preset = -1;        ///< Settings::NvidiaDlssPreset value over the setting
     int dusk_dlss_m = -1;        ///< The Duskbloods runs preset M as is (EDEN_NX2_DUSK_DLSS_M)
     int split_scale = -1;        ///< The Duskbloods' upscaler inputs stay at 1x (EDEN_NX2_DUSK_SPLIT)
+    /// An image that keeps bouncing between 1x and the resolution scale stays at 1x
+    /// (EDEN_NX2_RESCALE_PIN; default: The Duskbloods only)
+    int rescale_pin = -1;
 
     [[nodiscard]] std::uint32_t Effective() const noexcept {
         return named | (verify ? VerifyMask : 0);
@@ -174,6 +180,7 @@ inline std::atomic<int> g_dlss_auto_exposure{-1};
 inline std::atomic<int> g_dlss_preset{-1};
 inline std::atomic<int> g_dusk_dlss_m{-1};
 inline std::atomic<int> g_split_scale{-1};
+inline std::atomic<int> g_rescale_pin{-1};
 /// Live changes requested / applied, and the rasterizer frame of the last applied one.
 inline std::atomic<std::uint64_t> g_live_requested{};
 inline std::atomic<std::uint64_t> g_live_applied{};
@@ -202,6 +209,7 @@ inline void StoreLive(const LiveState& state) {
     g_dlss_preset.store(state.dlss_preset, std::memory_order_relaxed);
     g_dusk_dlss_m.store(state.dusk_dlss_m, std::memory_order_relaxed);
     g_split_scale.store(state.split_scale, std::memory_order_relaxed);
+    g_rescale_pin.store(state.rescale_pin, std::memory_order_relaxed);
 }
 
 [[nodiscard]] inline LiveState CurrentLive() {
@@ -221,6 +229,7 @@ inline void StoreLive(const LiveState& state) {
         .dlss_preset = g_dlss_preset.load(std::memory_order_relaxed),
         .dusk_dlss_m = g_dusk_dlss_m.load(std::memory_order_relaxed),
         .split_scale = g_split_scale.load(std::memory_order_relaxed),
+        .rescale_pin = g_rescale_pin.load(std::memory_order_relaxed),
     };
 }
 
@@ -270,11 +279,11 @@ inline bool ApplyLive(std::uint64_t frame) {
              "Nx2Perf live change #{} at frame {}: verify={} dusk_off={:#x} uboreuse={} "
              "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} "
              "dlss_tight={} dlss_hdr={} dlss_auto_exposure={} dlss_preset={} dusk_dlss_m={} "
-             "split_scale={} sites: {}",
+             "split_scale={} rescale_pin={} sites: {}",
              requested, frame, state.verify ? 1 : 0, state.dusk_off, state.uboreuse,
              state.frames_ahead, state.fence_batch, state.sync_submit, state.alias,
              state.alias_sync, state.dlss_tight, state.dlss_hdr, state.dlss_auto_exposure,
-             state.dlss_preset, state.dusk_dlss_m, state.split_scale,
+             state.dlss_preset, state.dusk_dlss_m, state.split_scale, state.rescale_pin,
              SitesText(state.Effective()));
     return true;
 }
@@ -310,6 +319,9 @@ inline void ReadSwitch() {
     }
     if (const char* value = std::getenv("EDEN_NX2_DLSS_TIGHT"); value && *value) {
         state.dlss_tight = value[0] == '1' ? 1 : 0;
+    }
+    if (const char* value = std::getenv("EDEN_NX2_RESCALE_PIN"); value && *value) {
+        state.rescale_pin = value[0] == '1' ? 1 : 0;
     }
     StoreLive(state);
     LOG_INFO(HW_GPU, "Nx2Perf sites (PERF_VERIFY={}, alias={:#x}, alias_sync={}): {}",
@@ -404,12 +416,80 @@ inline std::atomic<std::uint64_t> g_rescale_down{};
 inline std::atomic<std::uint64_t> g_rescale_flips{};
 /// Image copies between a scaled and an unscaled image, brought to one scale first.
 inline std::atomic<std::uint64_t> g_rescale_mismatches{};
+/// Images pinned at 1x (rescale_pin) in the last second.
+inline std::atomic<std::uint64_t> g_rescale_pins{};
 
-inline void NoteRescale(bool up, bool flip) {
+/// Why the texture cache changed an image's scale.
+enum class RescaleReason : std::uint8_t {
+    Target,        ///< RescaleRenderTargets: the bound targets go up together
+    TargetPartner, ///< RescaleRenderTargets: a bound target can't scale, so all go down
+    Storage,       ///< FillImageViews: written as a storage image (imageStore runs at 1x)
+    Alias,         ///< SynchronizeAliases
+    Copy,          ///< CopyImage between a scaled and an unscaled image
+    Blit,          ///< BlitImage
+    Join,          ///< an image joined from overlapping ones
+    Upscaler,      ///< the temporal upscaler's inputs and output
+    Split,         ///< split scale: the upscaler's inputs to 1x
+    Other,
+    Count,
+};
+inline constexpr std::array<std::string_view, static_cast<std::size_t>(RescaleReason::Count)>
+    RescaleReasonNames{"target", "target_partner", "storage",  "alias", "copy",
+                       "blit",   "join",           "upscaler", "split", "other"};
+inline std::array<std::array<std::atomic<std::uint64_t>, RescaleReasonNames.size()>, 2>
+    g_rescale_by{};
+
+/// The images that flipped in the last second (the texture cache notes, the rasterizer thread
+/// flushes): address, guest size, format, and the reasons of their last change up and down.
+struct FlipImage {
+    std::uint64_t gpu_addr{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::string format;
+    std::uint32_t flips{};
+    RescaleReason last_up{RescaleReason::Other};
+    RescaleReason last_down{RescaleReason::Other};
+};
+inline std::mutex g_flip_images_mutex;
+inline std::vector<FlipImage> g_flip_images;
+
+/// `format` is called only for an image not in the table yet.
+template <typename Format>
+inline void NoteRescale(bool up, bool flip, RescaleReason reason, std::uint64_t gpu_addr,
+                        std::uint32_t width, std::uint32_t height, Format&& format) {
     (up ? g_rescale_up : g_rescale_down).fetch_add(1, std::memory_order_relaxed);
-    if (flip) {
-        g_rescale_flips.fetch_add(1, std::memory_order_relaxed);
+    g_rescale_by[up ? 0 : 1][static_cast<std::size_t>(reason)].fetch_add(
+        1, std::memory_order_relaxed);
+    if (!flip) {
+        return;
     }
+    g_rescale_flips.fetch_add(1, std::memory_order_relaxed);
+    std::scoped_lock lock{g_flip_images_mutex};
+    auto it = std::find_if(g_flip_images.begin(), g_flip_images.end(), [&](const FlipImage& i) {
+        return i.gpu_addr == gpu_addr && i.width == width && i.height == height;
+    });
+    if (it == g_flip_images.end()) {
+        if (g_flip_images.size() >= 64) {
+            return;
+        }
+        it = g_flip_images.insert(g_flip_images.end(),
+                                  FlipImage{gpu_addr, width, height, format()});
+    }
+    ++it->flips;
+    (up ? it->last_up : it->last_down) = reason;
+}
+
+[[nodiscard]] inline std::string RescaleReasonsText(int direction) {
+    std::string text;
+    for (std::size_t i = 0; i < RescaleReasonNames.size(); ++i) {
+        const std::uint64_t count =
+            g_rescale_by[direction][i].exchange(0, std::memory_order_relaxed);
+        if (count != 0) {
+            text += (text.empty() ? "" : ",") + std::string{RescaleReasonNames[i]} + ":" +
+                    std::to_string(count);
+        }
+    }
+    return text.empty() ? "-" : text;
 }
 
 /// Rasterizer thread, each frame end: at most once a second, logs the changes when there were any.
@@ -423,9 +503,30 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
     const std::uint64_t down = g_rescale_down.exchange(0, std::memory_order_relaxed);
     const std::uint64_t flips = g_rescale_flips.exchange(0, std::memory_order_relaxed);
     const std::uint64_t mismatches = g_rescale_mismatches.exchange(0, std::memory_order_relaxed);
-    if (up + down + mismatches != 0) {
-        LOG_INFO(HW_GPU, "Rescale (last second): up={} down={} flips={} mismatched_copies={}", up,
-                 down, flips, mismatches);
+    const std::uint64_t pins = g_rescale_pins.exchange(0, std::memory_order_relaxed);
+    const std::string up_by = RescaleReasonsText(0);
+    const std::string down_by = RescaleReasonsText(1);
+    std::vector<FlipImage> images;
+    {
+        std::scoped_lock lock{g_flip_images_mutex};
+        images.swap(g_flip_images);
+    }
+    if (up + down + mismatches + pins != 0) {
+        std::sort(images.begin(), images.end(),
+                  [](const FlipImage& a, const FlipImage& b) { return a.flips > b.flips; });
+        std::string top;
+        for (std::size_t i = 0; i < images.size() && i < 6; ++i) {
+            const FlipImage& image = images[i];
+            top += fmt::format("{}{:x} {}x{} {} x{} up:{} down:{}", top.empty() ? "" : "; ",
+                               image.gpu_addr, image.width, image.height, image.format,
+                               image.flips,
+                               RescaleReasonNames[static_cast<std::size_t>(image.last_up)],
+                               RescaleReasonNames[static_cast<std::size_t>(image.last_down)]);
+        }
+        LOG_INFO(HW_GPU,
+                 "Rescale (last second): up={} down={} flips={} mismatched_copies={} pinned={} "
+                 "up_by={} down_by={} top_flips=[{}]",
+                 up, down, flips, mismatches, pins, up_by, down_by, top);
     }
 }
 

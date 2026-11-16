@@ -676,9 +676,16 @@ private:
                                           resolution.up_scale > (1U << resolution.down_shift));
     }
     void InvalidateScale(Image& image);
-    void NoteRescale(Image& image, bool up);
-    bool ScaleUp(Image& image);
-    bool ScaleDown(Image& image);
+    void NoteRescale(Image& image, bool up, Nx2Perf::RescaleReason reason);
+    bool ScaleUp(Image& image, Nx2Perf::RescaleReason reason = Nx2Perf::RescaleReason::Other);
+    bool ScaleDown(Image& image, Nx2Perf::RescaleReason reason = Nx2Perf::RescaleReason::Other);
+    /// rescale_pin: an image that keeps bouncing between scales (a render target also written as
+    /// a storage image, or bound with a target that can't scale) stays at 1x, and so do the
+    /// targets bound with it, instead of being resampled twice a frame.
+    [[nodiscard]] bool Pinned(const ImageBase& image) const noexcept {
+        return pin_active && image.native_pin == pin_generation;
+    }
+    void MaybePin(Image& image);
     u64 GetScaledImageSizeBytes(const ImageBase& image);
 
     /// The device memory an image counts for in total_used_memory between two driver readings:
@@ -746,6 +753,11 @@ private:
     /// skip the upload of a new target the clear overwrites whole.
     bool clearing_render_targets = false;
     bool is_rescaling = false;
+    /// rescale_pin: on, and the generation of the pins (a new one when it or split scale changes,
+    /// which lets every pinned image scale again).
+    bool pin_active = false;
+    bool pin_split = false;
+    u32 pin_generation = 1;
     u64 total_used_memory = 0;
     u64 minimum_memory;
     u64 expected_memory;

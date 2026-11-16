@@ -579,6 +579,7 @@ json LiveJson(const Perf::LiveState& live) {
                                   static_cast<Settings::NvidiaDlssPreset>(live.dlss_preset)))},
         {"dusk_dlss_m", control(live.dusk_dlss_m)},
         {"split_scale", control(live.split_scale)},
+        {"rescale_pin", control(live.rescale_pin)},
         {"alias", [&] {
              json alias = json::object();
              for (size_t i = 0; i < Perf::AliasNames.size(); ++i) {
@@ -708,6 +709,8 @@ json PerfFlip(ToolState& state, const json& params) {
         live.dusk_dlss_m = number();
     } else if (control == "split_scale") {
         live.split_scale = number();
+    } else if (control == "rescale_pin") {
+        live.rescale_pin = number(); // "default": The Duskbloods only
     } else if (control == "dlss_preset") {
         // "default" follows the setting; a letter (M, K, J, ...) or "nvidia" overrides it.
         const std::string text = value.get<std::string>();
@@ -747,7 +750,7 @@ json PerfFlip(ToolState& state, const json& params) {
                                  "sync_submit, verify, backx, backx.<piece>, alias_sync_always, "
                                  "alias_full_resolve, alias_resync_upload, alias_diag, "
                                  "dlss_tight, dlss_hdr, dlss_auto_exposure, dlss_preset, "
-                                 "dusk_dlss_m, split_scale"};
+                                 "dusk_dlss_m, split_scale, rescale_pin"};
     }
     return ApplyLiveParams(state, params, live);
 }
