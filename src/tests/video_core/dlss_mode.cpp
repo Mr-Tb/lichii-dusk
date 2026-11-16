@@ -7,6 +7,15 @@
 namespace Mode = VideoCommon::DlssMode;
 using Quality = Settings::NvidiaDlssQuality;
 
+TEST_CASE("The Duskbloods runs NVIDIA's preset in place of the default M", "[dlss_mode]") {
+    using Preset = Settings::NvidiaDlssPreset;
+    constexpr u64 dusk = 0x0400D1D02399A000ULL;
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, false) == Preset::NvidiaDefault);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, true) == Preset::M);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::L, false) == Preset::L);
+    STATIC_REQUIRE(Mode::EffectivePreset(0x04007EF01F8AE000ULL, Preset::M, false) == Preset::M);
+}
+
 TEST_CASE("DLSS settings preserve old profiles and per-game overrides", "[dlss_mode]") {
     REQUIRE(Settings::values.nvidia_dlss_preset.GetDefault() == Settings::NvidiaDlssPreset::M);
     REQUIRE(Settings::values.nvidia_dlss_quality.GetDefault() == Quality::Automatic);

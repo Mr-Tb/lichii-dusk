@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <cstdlib>
 #include <optional>
 #include "common/settings_enums.h"
 
@@ -69,6 +70,27 @@ Selection Select(Quality requested, Extent render, Extent output, Query&& query)
         }
     }
     return {std::nullopt, requested_range, requested != Quality::Automatic};
+}
+
+/// The Duskbloods with the default preset M, in every mode, runs NVIDIA's preset for the mode
+/// (K at DLAA, Quality and Balanced): M draws thin horizontal lines there at 2x resolution scale
+/// (3840x2160 output, as in Fire Emblem) and costs more. keep_m (EDEN_NX2_DUSK_DLSS_M=1) runs M.
+constexpr Settings::NvidiaDlssPreset EffectivePreset(u64 program_id,
+                                                     Settings::NvidiaDlssPreset preset,
+                                                     bool keep_m) {
+    return program_id == 0x0400D1D02399A000ULL && preset == Settings::NvidiaDlssPreset::M &&
+                   !keep_m
+               ? Settings::NvidiaDlssPreset::NvidiaDefault
+               : preset;
+}
+
+inline Settings::NvidiaDlssPreset EffectivePreset(u64 program_id,
+                                                  Settings::NvidiaDlssPreset preset) {
+    static const bool keep_m = [] {
+        const char* const value = std::getenv("EDEN_NX2_DUSK_DLSS_M");
+        return value && value[0] == '1';
+    }();
+    return EffectivePreset(program_id, preset, keep_m);
 }
 
 } // namespace VideoCommon::DlssMode

@@ -577,13 +577,9 @@ bool StreamlineDlssUpscaler::Upscale(const Inputs& in) {
     static const bool auto_exposure_allowed = EnvInt("EDEN_NX2_DLSS_AUTO_EXPOSURE", 1) != 0;
     options.colorBuffersHDR = in.hdr && hdr_allowed ? sl::eTrue : sl::eFalse;
     options.useAutoExposure = in.hdr && auto_exposure_allowed ? sl::eTrue : sl::eFalse;
-    // The Duskbloods on Automatic with the default preset (M): NVIDIA's own preset for the mode,
-    // K at the Balanced mode its ~0.58 render scale picks. M costs more, most on RTX 20 and 30.
-    const bool nvidia_preset = settings.quality == Settings::NvidiaDlssQuality::Automatic &&
-                               settings.preset == Settings::NvidiaDlssPreset::M &&
-                               Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL;
-    const sl::DLSSPreset preset =
-        nvidia_preset ? sl::DLSSPreset::eDefault : PresetFor(settings.preset);
+    const Settings::NvidiaDlssPreset effective_preset =
+        VideoCommon::DlssMode::EffectivePreset(Settings::GetCurrentProgramID(), settings.preset);
+    const sl::DLSSPreset preset = PresetFor(effective_preset);
     options.dlaaPreset = preset;
     options.qualityPreset = preset;
     options.balancedPreset = preset;
@@ -635,7 +631,8 @@ bool StreamlineDlssUpscaler::Upscale(const Inputs& in) {
 
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([this, in, options, options_changed, requested = settings.quality,
-                      preset_setting = settings.preset, index, constants, set_constants,
+                      preset_setting = settings.preset, effective_preset, index, constants,
+                      set_constants,
                       frame_gen, frame_gen_inputs, output_image_handle = *output_image,
                       output_view_handle = *output_view](vk::CommandBuffer cmdbuf) {
         const Clock::time_point eval_begin = Clock::now();
@@ -846,7 +843,7 @@ bool StreamlineDlssUpscaler::Upscale(const Inputs& in) {
         }
         last_evaluation.store(static_cast<u32>(evaluated_mode) |
                                   (static_cast<u32>(requested) << 8) |
-                                  (static_cast<u32>(preset_setting) << 16),
+                                  (static_cast<u32>(effective_preset) << 16),
                               std::memory_order_relaxed);
         evaluations.fetch_add(1, std::memory_order_release);
         // NGX doesn't report the model it picked, but its memory tells them apart: at 3840x2160
