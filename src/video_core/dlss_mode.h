@@ -87,20 +87,13 @@ constexpr Quality EffectiveQuality(u64 program_id, Quality mode) {
 }
 
 /// Split scale (The Duskbloods above 1x): the upscaler's inputs stay at 1x and its output is the
-/// render size times the mode's factor, at most the scaled target; a spatial stretch covers the
-/// rest. Automatic (and FSR 3.1) take a factor just under 2, which DLSS runs as Performance.
-constexpr Extent SplitOutput(Quality mode, Extent render, Extent target) {
+/// largest DLSS takes from them in a mode that follows a changing render size: just under 2x (the
+/// Performance ratio), at most the scaled target, whatever mode is selected (a higher-quality
+/// mode would only shrink the output of a fixed render). The scaled target itself (3840x2160 from
+/// 1108x624, 3.47x) is past every mode; Ultra Performance is exactly 3x and fits no other render
+/// size. One stretch covers the rest. FSR 3.1 takes the same size.
+constexpr Extent SplitOutput(Extent render, Extent target) {
     float factor = 1.95f;
-    switch (mode) {
-    case Quality::Quality:
-        factor = 1.5f;
-        break;
-    case Quality::Balanced:
-        factor = 1.72f;
-        break;
-    default:
-        break;
-    }
     if (render.width == 0 || render.height == 0) {
         return target;
     }

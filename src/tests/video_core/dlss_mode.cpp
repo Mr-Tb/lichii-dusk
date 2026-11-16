@@ -30,21 +30,18 @@ TEST_CASE("The Duskbloods offers only the DLSS modes its render region fits", "[
                    Quality::Native);
 }
 
-TEST_CASE("Split scale sizes the upscaler output by the mode, at most the target", "[dlss_mode]") {
+TEST_CASE("Split scale upscales just under 2x in every mode, at most the target", "[dlss_mode]") {
     constexpr Mode::Extent render{1108, 624};
     constexpr Mode::Extent target{3840, 2160};
-    constexpr auto automatic = Mode::SplitOutput(Quality::Automatic, render, target);
-    STATIC_REQUIRE(automatic.width == 2161);
-    STATIC_REQUIRE(automatic.height == 1217);
-    constexpr auto quality = Mode::SplitOutput(Quality::Quality, render, target);
-    STATIC_REQUIRE(quality.width == 1662);
-    STATIC_REQUIRE(quality.height == 936);
+    constexpr auto output = Mode::SplitOutput(render, target);
+    STATIC_REQUIRE(output.width == 2161);
+    STATIC_REQUIRE(output.height == 1217);
     // A render region already close to the target goes straight to it.
-    constexpr auto big = Mode::SplitOutput(Quality::Automatic, {2216, 1248}, target);
+    constexpr auto big = Mode::SplitOutput({2216, 1248}, target);
     STATIC_REQUIRE(big.width == 3840);
     STATIC_REQUIRE(big.height == 2160);
     // The aspect follows the render region when one axis reaches the target first.
-    constexpr auto wide = Mode::SplitOutput(Quality::Automatic, {1920, 600}, {2560, 1440});
+    constexpr auto wide = Mode::SplitOutput({1920, 600}, {2560, 1440});
     STATIC_REQUIRE(wide.width == 2560);
     STATIC_REQUIRE(wide.height == 800);
 }

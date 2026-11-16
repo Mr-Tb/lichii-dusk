@@ -270,11 +270,10 @@ public:
     /// Smoothed time between upscales: a gap of 4 of these (at least 250 ms) resets the history.
     f32 upscale_interval_ms = 1000.0f / 30.0f;
 
-    /// Split scale: the upscaler's output size, kept while the render size moves by under 1/16.
-    [[nodiscard]] VkExtent2D SplitExtent(Settings::NvidiaDlssQuality mode,
-                                         std::array<u32, 2> render_size, VkExtent2D target);
+    /// Split scale: the upscaler's output size, kept while the render size grows by under 1/16 or
+    /// stays at least half of it (DLSS Performance's ratio).
+    [[nodiscard]] VkExtent2D SplitExtent(std::array<u32, 2> render_size, VkExtent2D target);
     struct {
-        Settings::NvidiaDlssQuality mode{};
         std::array<u32, 2> render{};
         VkExtent2D target{};
         VkExtent2D extent{};

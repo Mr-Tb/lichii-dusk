@@ -1862,9 +1862,7 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     const VkExtent2D target = dst_framebuffer->RenderArea();
     const bool split = VideoCommon::DlssMode::SplitScaleActive(
         Settings::GetCurrentProgramID(), resolution.up_scale > (1U << resolution.down_shift));
-    // FSR 3.1 has no modes: it upscales as DLSS Automatic does.
-    const VkExtent2D extent =
-        split ? SplitExtent(Settings::NvidiaDlssQuality::Automatic, render_size, target) : target;
+    const VkExtent2D extent = split ? SplitExtent(render_size, target) : target;
     // A gap in the evaluations (a menu, a movie, a load) starts the history again. The gap is 4
     // smoothed frame intervals, at least 250 ms: at 8 FPS ordinary frame time spikes passed a
     // fixed 250 ms and restarted the history (a visible pop) several times a minute.
@@ -1964,18 +1962,20 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     return true;
 }
 
-VkExtent2D TextureCacheRuntime::SplitExtent(Settings::NvidiaDlssQuality mode,
-                                             std::array<u32, 2> render_size, VkExtent2D target) {
+VkExtent2D TextureCacheRuntime::SplitExtent(std::array<u32, 2> render_size, VkExtent2D target) {
     auto& kept = split_output;
-    const auto close_to = [](u32 a, u32 b) { return (a > b ? a - b : b - a) * 16 <= b; };
-    if (kept.mode == mode && kept.target.width == target.width &&
-        kept.target.height == target.height && kept.extent.width != 0 &&
-        close_to(render_size[0], kept.render[0]) && close_to(render_size[1], kept.render[1])) {
+    // Kept while the render size grows by under 1/16 or keeps at least half the output.
+    const auto keeps = [](u32 render, u32 kept_render, u32 output) {
+        return render * 16 <= kept_render * 17 && render * 2 >= output;
+    };
+    if (kept.target.width == target.width && kept.target.height == target.height &&
+        kept.extent.width != 0 && keeps(render_size[0], kept.render[0], kept.extent.width) &&
+        keeps(render_size[1], kept.render[1], kept.extent.height)) {
         return kept.extent;
     }
-    const auto output = VideoCommon::DlssMode::SplitOutput(
-        mode, {render_size[0], render_size[1]}, {target.width, target.height});
-    kept = {mode, render_size, target, VkExtent2D{output.width, output.height}};
+    const auto output = VideoCommon::DlssMode::SplitOutput({render_size[0], render_size[1]},
+                                                           {target.width, target.height});
+    kept = {render_size, target, VkExtent2D{output.width, output.height}};
     LOG_INFO(Render_Vulkan, "Split scale: {}x{} upscaled to {}x{}, then stretched to {}x{}",
              render_size[0], render_size[1], output.width, output.height, target.width,
              target.height);
@@ -2089,7 +2089,7 @@ bool TextureCacheRuntime::UpscaleWithDlss(Framebuffer* dst_framebuffer, ImageVie
     const bool split = VideoCommon::DlssMode::SplitScaleActive(
         Settings::GetCurrentProgramID(), resolution.up_scale > (1U << resolution.down_shift));
     const VkExtent2D extent = native_resolution ? VkExtent2D{render_size[0], render_size[1]}
-                              : split           ? SplitExtent(quality, render_size, target)
+                              : split           ? SplitExtent(render_size, target)
                                                 : target;
     bool upscaled{};
     try {
