@@ -7,13 +7,18 @@
 namespace Mode = VideoCommon::DlssMode;
 using Quality = Settings::NvidiaDlssQuality;
 
-TEST_CASE("The Duskbloods runs NVIDIA's preset in place of the default M", "[dlss_mode]") {
+TEST_CASE("The Duskbloods runs K above 1x and NVIDIA's preset for M at 1x", "[dlss_mode]") {
     using Preset = Settings::NvidiaDlssPreset;
     constexpr u64 dusk = 0x0400D1D02399A000ULL;
-    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, false) == Preset::NvidiaDefault);
-    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, true) == Preset::M);
-    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::L, false) == Preset::L);
-    STATIC_REQUIRE(Mode::EffectivePreset(0x04007EF01F8AE000ULL, Preset::M, false) == Preset::M);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, false, false) == Preset::NvidiaDefault);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::L, false, false) == Preset::L);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, false, true) == Preset::K);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::NvidiaDefault, false, true) == Preset::K);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::L, false, true) == Preset::K);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::M, true, true) == Preset::M);
+    STATIC_REQUIRE(Mode::EffectivePreset(dusk, Preset::L, true, true) == Preset::L);
+    STATIC_REQUIRE(Mode::EffectivePreset(0x04007EF01F8AE000ULL, Preset::M, false, true) ==
+                   Preset::M);
 }
 
 TEST_CASE("The Duskbloods offers only the DLSS modes its render region fits", "[dlss_mode]") {

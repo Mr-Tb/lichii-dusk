@@ -4,6 +4,7 @@
 
 #include <cstdlib>
 #include <optional>
+#include "common/settings.h"
 #include "common/settings_enums.h"
 #include "video_core/nx2_perf.h"
 
@@ -125,26 +126,34 @@ inline bool SplitScaleActive(u64 program_id, bool scaled) {
            Nx2Perf::LiveOr(Nx2Perf::g_split_scale, false);
 }
 
-/// The Duskbloods with the default preset M, in every mode, runs NVIDIA's preset for the mode
-/// (K at DLAA, Quality and Balanced): M draws thin horizontal lines there at 2x resolution scale
-/// (3840x2160 output, as in Fire Emblem) and costs more. keep_m (EDEN_NX2_DUSK_DLSS_M=1) runs M.
+/// The Duskbloods above 1x runs preset K in every mode: M (the setting's default, and NVIDIA's
+/// own preset for Performance) draws pairs of dark rows every 64 output rows at 2x resolution
+/// scale (3840x2160 output; 5 of 40 frames at Performance) and costs 14.0 ms there against K's
+/// 12.3 on an RTX 3060. At 1x M runs as NVIDIA's preset for the mode. keep (EDEN_NX2_DUSK_DLSS_M=1)
+/// runs the chosen preset as is.
 constexpr Settings::NvidiaDlssPreset EffectivePreset(u64 program_id,
-                                                     Settings::NvidiaDlssPreset preset,
-                                                     bool keep_m) {
-    return program_id == DuskbloodsProgramId && preset == Settings::NvidiaDlssPreset::M &&
-                   !keep_m
-               ? Settings::NvidiaDlssPreset::NvidiaDefault
-               : preset;
+                                                     Settings::NvidiaDlssPreset preset, bool keep,
+                                                     bool scaled) {
+    if (program_id != DuskbloodsProgramId || keep) {
+        return preset;
+    }
+    if (scaled) {
+        return Settings::NvidiaDlssPreset::K;
+    }
+    return preset == Settings::NvidiaDlssPreset::M ? Settings::NvidiaDlssPreset::NvidiaDefault
+                                                   : preset;
 }
 
 inline Settings::NvidiaDlssPreset EffectivePreset(u64 program_id,
                                                   Settings::NvidiaDlssPreset preset) {
-    static const bool keep_m = [] {
+    static const bool keep = [] {
         const char* const value = std::getenv("EDEN_NX2_DUSK_DLSS_M");
         return value && value[0] == '1';
     }();
+    const auto& resolution = Settings::values.resolution_info;
     // The debug server's perf_flip dusk_dlss_m overrides the switch live.
-    return EffectivePreset(program_id, preset, Nx2Perf::LiveOr(Nx2Perf::g_dusk_dlss_m, keep_m));
+    return EffectivePreset(program_id, preset, Nx2Perf::LiveOr(Nx2Perf::g_dusk_dlss_m, keep),
+                           resolution.up_scale > (1U << resolution.down_shift));
 }
 
 } // namespace VideoCommon::DlssMode

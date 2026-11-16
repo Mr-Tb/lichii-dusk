@@ -610,10 +610,9 @@ bool StreamlineDlssUpscaler::Upscale(const Inputs& in) {
     const bool hdr_now = in.hdr && Perf::LiveOr(Perf::g_dlss_hdr, hdr_switch);
     const bool auto_exposure_now =
         in.hdr && Perf::LiveOr(Perf::g_dlss_auto_exposure, auto_exposure_switch);
-    // Inputs that are a region of larger images go to DLSS as render-sized copies at 0,0: on by
-    // default with preset M, which draws horizontal lines at 4K output from region inputs.
-    const bool tight_now = Perf::LiveOr(Perf::g_dlss_tight,
-                                        effective_preset == Settings::NvidiaDlssPreset::M);
+    // Inputs that are a region of larger images go to DLSS as render-sized copies at 0,0 (a test
+    // control, off by default: they did not stop M's lines at 4K output, 7 of 32 frames).
+    const bool tight_now = Perf::LiveOr(Perf::g_dlss_tight, false);
     const bool options_changed = extent_changed || in.hdr != hdr_input ||
                                  quality_mode != requested_quality ||
                                  model_preset != effective_preset || hdr_now != hdr_option ||
