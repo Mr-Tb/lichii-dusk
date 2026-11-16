@@ -79,11 +79,16 @@
 #include "core/tools/renderdoc.h"
 #include "hid_core/hid_core.h"
 #include "network/network.h"
+#include "video_core/dlss_mode.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/nx2_backx.h"
 #include "video_core/nx2_stutter_trace.h"
 #include "video_core/renderer_base.h"
 #include "video_core/video_core.h"
+
+#ifndef _WIN32
+extern char** environ;
+#endif
 
 namespace Core {
 
@@ -141,6 +146,43 @@ std::optional<u64> Switch2ProgramId(FileSys::ProgramMetadata& metadata,
         return std::nullopt;
     }
     return metadata.GetTitleID();
+}
+
+// One line with what decides a session's image and frame rate, so a report's log says it up front.
+void LogBootSummary(u64 program_id) {
+    const auto& v = Settings::values;
+    const auto preset = v.nvidia_dlss_preset.GetValue();
+    const auto effective = VideoCommon::DlssMode::EffectivePreset(program_id, preset);
+    std::string switches;
+#ifdef _WIN32
+    char** const environment = _environ;
+#else
+    char** const environment = environ;
+#endif
+    for (char** entry = environment; entry && *entry; ++entry) {
+        const std::string_view variable{*entry};
+        if (variable.starts_with("EDEN_NX2_") || variable.starts_with("EDEN_DKB_")) {
+            switches += switches.empty() ? "" : " ";
+            switches += variable;
+        }
+    }
+    const bool dusk_scaled = program_id == 0x0400D1D02399A000ULL &&
+                             v.resolution_info.up_scale > (1U << v.resolution_info.down_shift);
+    LOG_INFO(Core,
+             "Nx2Summary boot: program {:016X}, resolution {} ({:.2f}x), upscaler {}, DLSS mode {}, "
+             "preset {}{}, accuracy {}, vsync {}, window filter {}, fullscreen {}, memory layout {}, "
+             "pin GPU threads {}, switches [{}]{}",
+             program_id, v.resolution_setup.ToString(), v.resolution_info.up_factor,
+             v.nvidia_dlss.GetValue() ? "NVIDIA DLSS (FSR 3.1 if unavailable)" : "FSR 3.1",
+             v.nvidia_dlss_quality.ToString(), v.nvidia_dlss_preset.ToString(),
+             effective != preset ? fmt::format(" (runs {})", Settings::CanonicalizeEnum(effective))
+                                 : std::string{},
+             v.gpu_accuracy.ToString(), v.vsync_mode.ToString(), v.scaling_filter.ToString(),
+             v.fullscreen_mode.ToString(), v.memory_layout_mode.ToString(),
+             v.pin_gpu_threads.ToString(), switches,
+             dusk_scaled ? "; Duskbloods above 1x renders the scene and the upscale at 4x the "
+                           "pixels or more, tested at 1x"
+                         : "");
 }
 
 } // namespace
@@ -613,6 +655,7 @@ struct System::Impl {
         }
 
         GameSettings::LoadOverrides(program_id, gpu_core->Renderer());
+        LogBootSummary(params.program_id);
         if (auto room_member = Network::GetRoomMember().lock()) {
             Network::GameInfo game_info;
             game_info.name = name;
