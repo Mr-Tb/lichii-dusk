@@ -2265,14 +2265,27 @@ void Device::CollectPhysicalMemoryInfo() {
         const u64 memory_size = Settings::values.vram_usage_mode.GetValue() == Settings::VramUsageMode::Aggressive ? 6_GiB : 4_GiB;
         device_access_memory = static_cast<u64>(std::max<s64>(std::min<s64>(available_memory - 8_GiB, memory_size), std::min<s64>(local_memory, memory_size)));
     } else {
+        const u64 budget_memory = device_access_memory;
         const u64 reserve_memory = std::min<u64>(device_access_memory / 8, 1_GiB);
         device_access_memory -= reserve_memory;
         if (Settings::values.vram_usage_mode.GetValue() != Settings::VramUsageMode::Aggressive) {
             // Account for resolution scaling in memory limits
             const size_t normal_memory = 6_GiB;
             const size_t scaler_memory = 1_GiB * Settings::values.resolution_info.ScaleUp(1);
-            device_access_memory = std::min<u64>(device_access_memory, normal_memory + scaler_memory);
+            const u64 capped =
+                std::min<u64>(device_access_memory, normal_memory + scaler_memory);
+            // A card with a budget of 12 GiB or more keeps three quarters of it: the fixed cap
+            // left an RX 9070 XT (16 GB) at 8 GiB at 2x, evicting and re-decoding all the time.
+            device_access_memory = budget_memory >= 12_GiB
+                                       ? std::max<u64>(capped, device_access_memory / 4 * 3)
+                                       : capped;
         }
+        LOG_INFO(Render_Vulkan, "VRAM for the caches: {} MiB of a {} MiB budget ({})",
+                 device_access_memory >> 20, budget_memory >> 20,
+                 Settings::values.vram_usage_mode.GetValue() == Settings::VramUsageMode::Aggressive
+                     ? "aggressive"
+                     : budget_memory >= 12_GiB ? "three quarters of a large budget"
+                                               : "conservative cap 6 GiB + 1 GiB per scale");
     }
 }
 

@@ -63,6 +63,12 @@ void BlitScreen::SetWindowAdaptPass(const Device& device) {
         return;
     }
 
+    if (area_downscale) {
+        // The scaled frame is larger than the window (2x in a 1080p/1440p window): a nearest
+        // neighbour present shimmered on the RX 9070 XT report.
+        window_adapt = MakeArea(device, swapchain_view_format);
+        return;
+    }
     switch (scaling_filter) {
     case Settings::ScalingFilter::NearestNeighbor:
         window_adapt = MakeNearestNeighbor(device, swapchain_view_format);
@@ -139,8 +145,8 @@ void BlitScreen::DrawToFrame(const Device& device, RasterizerVulkan& rasterizer,
     }
 
     const auto& resolution = Settings::values.resolution_info;
+    // Any filter: point, bilinear and the upscaling kernels all skip texels when minifying.
     const bool downscale =
-        filters.get_scaling_filter() == Settings::ScalingFilter::Bilinear &&
         std::ranges::any_of(framebuffers, [&](const Tegra::FramebufferConfig& fb) {
             return resolution.ScaleUp(fb.width) > layout.screen.GetWidth() ||
                    resolution.ScaleUp(fb.height) > layout.screen.GetHeight();
