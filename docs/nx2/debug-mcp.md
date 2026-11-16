@@ -297,6 +297,14 @@ and what stays start-time only.
 `backx` (all pieces) or `backx.<piece>` `"old"` | `"upstream"`; `verify` 0 | 1. `frames_ahead`
 acts from the next present, `fence_batch` from the next fence batch, `sync_submit` from the next
 GPFIFO submit (the guest thread waits up to 2 s for its own fence, as `EDEN_NX2_SYNC_SUBMIT=1`).
+`rescale_pin` 0 | 1 | `"default"` (The Duskbloods only): an image that keeps changing scale stays
+at 1x, with the targets bound with it (`EDEN_NX2_RESCALE_PIN`).
+
+**`upscale_inputs`** `{count?}` returns the last `count` (default 64, at most 256) temporal
+upscales the texture cache tried, oldest first: colour, depth and motion (address, guest size,
+`scaled`, `age` = upscales since it was last written), region, jitter, motion scale, `reset`,
+`outcome` (`ran` or why not) and `anomalies` (`stale`, `scale`, `region`, `not_run`). The log has
+one `Upscale inputs (last second):` line with the same counts.
 
 Start-time only: `state_blocks`' front half (the split front decides whether it sends register
 blocks when it starts; the back applying them one write at a time is live), `EDEN_NX2_SPLIT`, and

@@ -530,4 +530,138 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
     }
 }
 
+/// The temporal upscaler's inputs, one record per upscale the texture cache tried (rasterizer
+/// thread): what each input was, whether it was written since the previous upscale, and what the
+/// upscaler was told. The debug server's upscale_inputs reads the ring.
+struct UpscaleInput {
+    std::uint64_t gpu_addr{}; ///< 0: none
+    std::uint32_t width{};    ///< guest size
+    std::uint32_t height{};
+    bool scaled{};
+    std::uint32_t age{}; ///< upscales since it was last written (0: written for this one)
+};
+enum class UpscaleOutcome : std::uint8_t { Ran, ScaleMismatch, SizeMismatch, NoView, Declined };
+inline constexpr std::array<std::string_view, 5> UpscaleOutcomeNames{
+    "ran", "scale_mismatch", "size_mismatch", "no_view", "declined"};
+struct UpscaleRecord {
+    std::uint64_t frame{};
+    UpscaleInput color;
+    UpscaleInput depth;
+    UpscaleInput motion;
+    std::uint32_t region_width{};
+    std::uint32_t region_height{};
+    std::array<float, 2> jitter{};
+    std::array<float, 2> motion_scale{};
+    bool reset{};
+    UpscaleOutcome outcome{UpscaleOutcome::Ran};
+};
+/// Per second: records, and the anomalies among them.
+struct UpscaleAnomalies {
+    std::uint64_t records{};
+    std::uint64_t stale{};           ///< an input not written since the previous upscale
+    std::uint64_t scale_mismatch{};  ///< inputs at different scales
+    std::uint64_t region_mismatch{}; ///< inputs of different sizes, or a region outside them
+    std::uint64_t not_run{};         ///< the upscaler did not run on them
+    std::uint64_t resets{};
+};
+inline std::mutex g_upscale_ring_mutex;
+inline std::array<UpscaleRecord, 256> g_upscale_ring{};
+inline std::uint64_t g_upscale_ring_next{};
+inline UpscaleAnomalies g_upscale_anomalies{};
+
+inline void PushUpscale(const UpscaleRecord& record) {
+    std::scoped_lock lock{g_upscale_ring_mutex};
+    g_upscale_ring[g_upscale_ring_next++ % g_upscale_ring.size()] = record;
+    auto& a = g_upscale_anomalies;
+    ++a.records;
+    const bool has_depth = record.depth.gpu_addr != 0;
+    if (record.color.age > 0 || record.motion.age > 0 || (has_depth && record.depth.age > 0)) {
+        ++a.stale;
+    }
+    if (record.motion.scaled != record.color.scaled ||
+        (has_depth && record.depth.scaled != record.color.scaled)) {
+        ++a.scale_mismatch;
+    }
+    const auto same_size = [&](const UpscaleInput& input) {
+        return input.width == record.color.width && input.height == record.color.height;
+    };
+    if (!same_size(record.motion) || (has_depth && !same_size(record.depth)) ||
+        record.region_width > record.color.width || record.region_height > record.color.height) {
+        ++a.region_mismatch;
+    }
+    if (record.reset) {
+        ++a.resets;
+    }
+    if (record.outcome != UpscaleOutcome::Ran) {
+        ++a.not_run;
+    }
+}
+
+/// The outcome of the record pushed last, decided after the push.
+inline void SetUpscaleOutcome(UpscaleOutcome outcome) {
+    std::scoped_lock lock{g_upscale_ring_mutex};
+    if (g_upscale_ring_next == 0) {
+        return;
+    }
+    UpscaleRecord& record = g_upscale_ring[(g_upscale_ring_next - 1) % g_upscale_ring.size()];
+    if (record.outcome == UpscaleOutcome::Ran && outcome != UpscaleOutcome::Ran) {
+        ++g_upscale_anomalies.not_run;
+    }
+    record.outcome = outcome;
+}
+
+/// The last `count` records, oldest first.
+[[nodiscard]] inline std::vector<UpscaleRecord> UpscaleRing(std::size_t count) {
+    std::scoped_lock lock{g_upscale_ring_mutex};
+    const std::uint64_t have =
+        std::min<std::uint64_t>(g_upscale_ring_next, g_upscale_ring.size());
+    const std::uint64_t n = std::min<std::uint64_t>(count, have);
+    std::vector<UpscaleRecord> out;
+    out.reserve(static_cast<std::size_t>(n));
+    for (std::uint64_t i = g_upscale_ring_next - n; i < g_upscale_ring_next; ++i) {
+        out.push_back(g_upscale_ring[i % g_upscale_ring.size()]);
+    }
+    return out;
+}
+
+/// Rasterizer thread, each frame end: at most once a second, the upscaler's inputs when there
+/// were upscales.
+inline void FlushUpscaleInputs(std::uint64_t now_ms) {
+    static std::uint64_t last_ms{};
+    if (now_ms - last_ms < 1000) {
+        return;
+    }
+    last_ms = now_ms;
+    UpscaleAnomalies anomalies;
+    UpscaleRecord last;
+    {
+        std::scoped_lock lock{g_upscale_ring_mutex};
+        anomalies = std::exchange(g_upscale_anomalies, UpscaleAnomalies{});
+        if (g_upscale_ring_next != 0) {
+            last = g_upscale_ring[(g_upscale_ring_next - 1) % g_upscale_ring.size()];
+        }
+    }
+    if (anomalies.records == 0) {
+        return;
+    }
+    const auto input = [](const UpscaleInput& i) {
+        return i.gpu_addr == 0 ? std::string{"none"}
+                               : fmt::format("{:x} {}x{}{} age {}", i.gpu_addr, i.width,
+                                             i.height, i.scaled ? " scaled" : "", i.age);
+    };
+    const bool clean =
+        anomalies.stale + anomalies.scale_mismatch + anomalies.region_mismatch + anomalies.not_run ==
+        0;
+    LOG_INFO(HW_GPU,
+             "Upscale inputs (last second): {} records, {} stale, {} scale_mismatch, {} "
+             "region_mismatch, {} not_run, {} resets{}; last: color {}, depth {}, motion {}, "
+             "region {}x{}, jitter {:.3f},{:.3f}, mvec scale {:.4f},{:.4f}, {}",
+             anomalies.records, anomalies.stale, anomalies.scale_mismatch,
+             anomalies.region_mismatch, anomalies.not_run, anomalies.resets,
+             clean ? "" : " ANOMALY", input(last.color), input(last.depth), input(last.motion),
+             last.region_width, last.region_height, last.jitter[0], last.jitter[1],
+             last.motion_scale[0], last.motion_scale[1],
+             UpscaleOutcomeNames[static_cast<std::size_t>(last.outcome)]);
+}
+
 } // namespace VideoCommon::Nx2Perf

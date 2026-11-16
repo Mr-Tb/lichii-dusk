@@ -216,6 +216,57 @@ json Status(ToolState& state, const json& params) {
     };
 }
 
+/// The last upscales' inputs (Nx2Perf::PushUpscale), oldest first: {count} (default 64, at most
+/// 256). An entry's anomalies: stale (an input not written since the previous upscale), scale
+/// (inputs at different scales), region (inputs of different sizes or a region outside them),
+/// not_run (the upscaler did not run on them).
+json UpscaleInputs(ToolState&, const json& params) {
+    namespace Perf = VideoCommon::Nx2Perf;
+    const auto records = Perf::UpscaleRing(static_cast<size_t>(Param<int>(params, "count", 64, 1, 256)));
+    const auto input = [](const Perf::UpscaleInput& i) -> json {
+        if (i.gpu_addr == 0) {
+            return nullptr;
+        }
+        return {{"address", HexAddress(i.gpu_addr)},
+                {"size", {i.width, i.height}},
+                {"scaled", i.scaled},
+                {"age", i.age}};
+    };
+    json out = json::array();
+    for (const auto& r : records) {
+        json anomalies = json::array();
+        const bool has_depth = r.depth.gpu_addr != 0;
+        if (r.color.age > 0 || r.motion.age > 0 || (has_depth && r.depth.age > 0)) {
+            anomalies.push_back("stale");
+        }
+        if (r.motion.scaled != r.color.scaled || (has_depth && r.depth.scaled != r.color.scaled)) {
+            anomalies.push_back("scale");
+        }
+        const auto same = [&](const Perf::UpscaleInput& i) {
+            return i.width == r.color.width && i.height == r.color.height;
+        };
+        if (!same(r.motion) || (has_depth && !same(r.depth)) || r.region_width > r.color.width ||
+            r.region_height > r.color.height) {
+            anomalies.push_back("region");
+        }
+        if (r.outcome != Perf::UpscaleOutcome::Ran) {
+            anomalies.push_back("not_run");
+        }
+        out.push_back({{"frame", r.frame},
+                       {"color", input(r.color)},
+                       {"depth", input(r.depth)},
+                       {"motion", input(r.motion)},
+                       {"region", {r.region_width, r.region_height}},
+                       {"jitter", {r.jitter[0], r.jitter[1]}},
+                       {"motion_scale", {r.motion_scale[0], r.motion_scale[1]}},
+                       {"reset", r.reset},
+                       {"outcome", std::string{Perf::UpscaleOutcomeNames[static_cast<size_t>(
+                                       r.outcome)]}},
+                       {"anomalies", std::move(anomalies)}});
+    }
+    return {{"records", std::move(out)}};
+}
+
 json FrameTimes(ToolState& state, const json& params) {
     const double seconds = params.value("seconds", 5.0);
     const double refresh_hz = params.value("refresh_hz", 60.0);
@@ -1083,6 +1134,7 @@ Handlers MakeHandlers(const std::shared_ptr<ToolState>& state) {
         {"perf_sites", handler(PerfSites)},
         {"perf_slow", handler(PerfSlow)},
         {"perf_flip", handler(PerfFlip)},
+        {"upscale_inputs", handler(UpscaleInputs)},
         {"sample", handler(SampleThreads)},
         {"speed_limit", handler(SpeedLimit)},
         {"host_timing", handler(HostTiming)},

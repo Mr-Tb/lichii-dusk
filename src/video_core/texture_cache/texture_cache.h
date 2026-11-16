@@ -1857,13 +1857,47 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
                 }
             }
         }
+        // What the upscaler is handed (Nx2Perf::PushUpscale): each input's image, and how many
+        // upscales ago it was last written.
+        const auto note_input = [&](std::size_t slot, ImageId id) {
+            if (!id) {
+                return Nx2Perf::UpscaleInput{};
+            }
+            const Image& image = slot_images[id];
+            UpscaleSeen& seen = upscale_seen[slot];
+            seen.age = seen.id == id && seen.modification_tick == image.modification_tick
+                           ? seen.age + 1
+                           : 0;
+            seen.id = id;
+            seen.modification_tick = image.modification_tick;
+            return Nx2Perf::UpscaleInput{image.gpu_addr, image.info.size.width,
+                                         image.info.size.height, rescaled(id), seen.age};
+        };
+        {
+            const Extent3D color_size = slot_images[src_id].info.size;
+            const std::array<u32, 2> region =
+                render_region.value_or(std::array{color_size.width, color_size.height});
+            Nx2Perf::PushUpscale({
+                .frame = frame_tick,
+                .color = note_input(0, src_id),
+                .depth = note_input(1, depth_id),
+                .motion = note_input(2, motion_id),
+                .region_width = region[0],
+                .region_height = region[1],
+                .jitter = jitter,
+                .motion_scale = motion_scale,
+                .reset = !use_history,
+            });
+        }
         // FSR 3.1 reads colour, motion and depth texel for texel: all at the colour's scale.
         if (depth_id && (rescaled(depth_id) != rescaled(src_id) ||
                          rescaled(motion_id) != rescaled(src_id))) {
+            Nx2Perf::SetUpscaleOutcome(Nx2Perf::UpscaleOutcome::ScaleMismatch);
             return false;
         }
         const Extent3D src_size = slot_images[src_id].info.size;
         if (src_size.width != src.width || src_size.height != src.height) {
+            Nx2Perf::SetUpscaleOutcome(Nx2Perf::UpscaleOutcome::SizeMismatch);
             return false;
         }
         // The game may render only part of its colour target.
@@ -1892,6 +1926,7 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         const auto motion_view = view(motion_id, motion_surface, motion_info.format);
         const auto dst_view = view(dst_id, dst, result->dst_format);
         if (!src_view || !motion_view || !dst_view) {
+            Nx2Perf::SetUpscaleOutcome(Nx2Perf::UpscaleOutcome::NoView);
             return false;
         }
         ImageViewId depth_view{};
@@ -1903,16 +1938,21 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
                                             range));
             }
             if (!depth_view) {
+                Nx2Perf::SetUpscaleOutcome(Nx2Perf::UpscaleOutcome::NoView);
                 return false;
             }
         }
         // After the views: creating them may reallocate the framebuffer slots.
         Framebuffer* const dst_framebuffer = &slot_framebuffers[dst_view->first];
-        return runtime.TemporalUpscale(
+        const bool upscaled = runtime.TemporalUpscale(
             dst_framebuffer, slot_image_views[dst_view->second], slot_image_views[src_view->second],
             slot_image_views[motion_view->second],
             depth_view ? &slot_image_views[depth_view] : nullptr, render_size, jitter,
             motion_scale, use_history);
+        if (!upscaled) {
+            Nx2Perf::SetUpscaleOutcome(Nx2Perf::UpscaleOutcome::Declined);
+        }
+        return upscaled;
     }
 }
 

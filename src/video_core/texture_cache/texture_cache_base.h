@@ -686,6 +686,13 @@ private:
         return pin_active && image.native_pin == pin_generation;
     }
     void MaybePin(Image& image);
+    /// The upscaler's colour, depth and motion inputs at the last upscale, for their age.
+    struct UpscaleSeen {
+        ImageId id{};
+        u64 modification_tick{};
+        u32 age{};
+    };
+    std::array<UpscaleSeen, 3> upscale_seen{};
     u64 GetScaledImageSizeBytes(const ImageBase& image);
 
     /// The device memory an image counts for in total_used_memory between two driver readings:

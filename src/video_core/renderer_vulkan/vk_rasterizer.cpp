@@ -3884,6 +3884,7 @@ void RasterizerVulkan::TickFrame() {
             VideoCommon::Nx2Perf::FlushAliasStats(now_ms);
         }
         VideoCommon::Nx2Perf::FlushRescaleStats(now_ms);
+        VideoCommon::Nx2Perf::FlushUpscaleInputs(now_ms);
     }
     if (VideoCore::Nx2Debug::HasRequests()) {
         if (const auto id = VideoCore::Nx2Debug::TakeDrawList()) {
