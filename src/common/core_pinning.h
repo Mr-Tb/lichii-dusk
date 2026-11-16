@@ -22,6 +22,20 @@ struct LogicalProcessor {
     u8 efficiency_class;
 };
 
+/// Threads that are busy most of a Switch 2 frame: six guest cores, the GPU front and back, the
+/// Vulkan worker, HostTiming, fencing and audio.
+constexpr std::size_t BusyThreads = 12;
+
+/// Logical processors of the fastest class (all of them on a CPU that is not hybrid).
+[[nodiscard]] std::size_t CountFastLogical(std::span<const LogicalProcessor> processors);
+
+/// With fewer fast logical processors than busy threads, keeping the threads on the fast ones,
+/// pinning the GPU threads or spinning HostTiming crowds them: a Core Ultra 9 275HX (8 P cores
+/// without SMT) ran slower than with Windows placing them freely.
+constexpr bool FitsBusyThreads(std::size_t fast_logical) {
+    return fast_logical >= BusyThreads;
+}
+
 /// Physical cores of the fastest class needed before the GPU threads are pinned.
 constexpr std::size_t MinCoresForGpuThreadPinning = 6;
 

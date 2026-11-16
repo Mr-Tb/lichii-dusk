@@ -44,6 +44,16 @@ GpuThreadPinning PlanGpuThreadPinning(std::span<const LogicalProcessor> processo
     return plan;
 }
 
+std::size_t CountFastLogical(std::span<const LogicalProcessor> processors) {
+    if (processors.empty()) {
+        return 0;
+    }
+    const u8 fastest =
+        std::ranges::max(processors, {}, &LogicalProcessor::efficiency_class).efficiency_class;
+    return static_cast<std::size_t>(std::ranges::count(processors, fastest,
+                                                        &LogicalProcessor::efficiency_class));
+}
+
 std::vector<u32> ParseCpuList(std::string_view list) {
     std::vector<u32> cpus;
     while (!list.empty() && (list.back() == '\n' || list.back() == ' ')) {

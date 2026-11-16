@@ -142,6 +142,10 @@ enum class PinnedRole : u32 { GpuFront, GpuBack, GuestCore };
 /// on other hosts.
 void PinCurrentThread(PinnedRole role);
 
+/// Logical processors of the host's fastest class (CountFastLogical), or EDEN_NX2_FAST_CPUS=N to
+/// test the decisions that depend on it. Logged once.
+std::size_t FastLogicalProcessors();
+
 void RefreshThreadPolicies();
 void PollThreadPolicies();
 

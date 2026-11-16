@@ -13,6 +13,7 @@
 #include <vector>
 #include "common/assert.h"
 #include "common/logging.h"
+#include "common/scope_exit.h"
 #include "common/settings.h"
 #include "core/core.h"
 #include "core/hle/kernel/k_process.h"
@@ -536,6 +537,15 @@ NvResult nvhost_gpu::SubmitGPFIFOImpl(IoctlSubmitGpfifo& params, Tegra::CommandL
         VideoCommon::Nx2Perf::LiveOr(VideoCommon::Nx2Perf::g_sync_submit, sync_submit_switch);
     if (g_nx2_driver && sync_submit && increment > 0) {
         lock.unlock();
+        const auto wait_begin = std::chrono::steady_clock::now();
+        SCOPE_EXIT {
+            VideoCommon::Nx2Perf::g_sync_submit_wait_ns.fetch_add(
+                static_cast<u64>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                     std::chrono::steady_clock::now() - wait_begin)
+                                     .count()),
+                std::memory_order_relaxed);
+            VideoCommon::Nx2Perf::g_sync_submit_waits.fetch_add(1, std::memory_order_relaxed);
+        };
         auto& syncpoints = system.Host1x().GetSyncpointManager();
         if (!syncpoints.IsReadyGuest(params.fence.id, params.fence.value)) {
             struct Wake {

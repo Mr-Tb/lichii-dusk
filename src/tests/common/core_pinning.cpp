@@ -202,3 +202,22 @@ TEST_CASE("Core pinning: a 4P+4E CPU whose E-cores rank lower is skipped",
     CHECK(plan.performance_cores == 4);
     CheckSkipped(plan);
 }
+
+TEST_CASE("Busy threads fit only CPUs with enough fast logical processors",
+          "[common][core_pinning]") {
+    // Core Ultra 9 275HX: 8 P cores without SMT and 16 E cores.
+    std::vector<LogicalProcessor> arrow_lake;
+    AddCores(arrow_lake, 8, 1, 1);
+    AddCores(arrow_lake, 16, 1, 0);
+    CHECK(Common::CountFastLogical(arrow_lake) == 8);
+    CHECK(!Common::FitsBusyThreads(Common::CountFastLogical(arrow_lake)));
+    // i5-12400F: 6 cores with SMT, not hybrid.
+    CHECK(Common::CountFastLogical(Uniform(6, 2)) == 12);
+    CHECK(Common::FitsBusyThreads(Common::CountFastLogical(Uniform(6, 2))));
+    // i9-13900K: 8 P cores with SMT and 16 E cores.
+    std::vector<LogicalProcessor> raptor_lake;
+    AddCores(raptor_lake, 8, 2, 1);
+    AddCores(raptor_lake, 16, 1, 0);
+    CHECK(Common::FitsBusyThreads(Common::CountFastLogical(raptor_lake)));
+    CHECK(Common::CountFastLogical({}) == 0);
+}

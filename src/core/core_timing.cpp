@@ -13,7 +13,9 @@
 #include <vector>
 #include "common/cpu_features.h"
 #include "common/cpu_features.h"
+#include "common/core_pinning.h"
 #include "common/logging.h"
+#include "common/thread.h"
 #include "common/thread_cpu_clock.h"
 
 #ifdef _WIN32
@@ -193,8 +195,11 @@ void CoreTiming::WaitForEvent(s64 next_time) {
     bool signalled = false;
     // The Duskbloods keeps the pre-#1016 hardware wait: an OS sleep at HostTiming priority wakes
     // 5+ ms late under its time-critical threads, which starved the sysmix output timer.
+    // Not where the fast processors are fewer than the busy threads: the spin takes one of them.
     const bool spin = host_spin_env == 1 ||
-                      (host_spin_env == -1 && Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL);
+                      (host_spin_env == -1 &&
+                       Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL &&
+                       Common::FitsBusyThreads(Common::FastLogicalProcessors()));
     if (!spin && next_time - now > HOST_WAIT_MARGIN_NS) {
         signalled = event.SleepFor(std::chrono::nanoseconds{next_time - HOST_WAIT_MARGIN_NS - now});
         now = GetGlobalTimeNs().count();

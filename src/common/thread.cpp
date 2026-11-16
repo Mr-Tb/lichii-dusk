@@ -465,14 +465,10 @@ struct WindowsCpuSets {
     bool hybrid = false;
 };
 
-const WindowsCpuSets& CpuSets() {
-    static const WindowsCpuSets sets = [] {
-        WindowsCpuSets result;
-        if (const char* text = std::getenv("EDEN_HYBRID_CORES");
-            text != nullptr && std::strtol(text, nullptr, 10) == 0) {
-            LOG_INFO(Common, "Hybrid core placement off (EDEN_HYBRID_CORES=0)");
-            return result;
-        }
+// Every logical processor the process may use, with its core and efficiency class.
+const std::vector<Common::LogicalProcessor>& WindowsProcessors() {
+    static const std::vector<Common::LogicalProcessor> processors = [] {
+        std::vector<Common::LogicalProcessor> result;
         using PFN_GetSystemCpuSetInformation = BOOL(WINAPI*)(PSYSTEM_CPU_SET_INFORMATION, ULONG,
                                                              PULONG, HANDLE, ULONG);
         const HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
@@ -491,7 +487,6 @@ const WindowsCpuSets& CpuSets() {
                  GetCurrentProcess(), 0)) {
             return result;
         }
-        u8 best = 0;
         for (ULONG offset = 0; offset + sizeof(SYSTEM_CPU_SET_INFORMATION) <= length;) {
             const auto* info =
                 reinterpret_cast<const SYSTEM_CPU_SET_INFORMATION*>(buffer.data() + offset);
@@ -501,27 +496,44 @@ const WindowsCpuSets& CpuSets() {
             if (info->Type == CpuSetInformation) {
                 const u32 core =
                     (static_cast<u32>(info->CpuSet.Group) << 8) | info->CpuSet.CoreIndex;
-                result.processors.push_back({static_cast<u32>(info->CpuSet.Id), core,
-                                             static_cast<u8>(info->CpuSet.EfficiencyClass)});
-                best = (std::max)(best, static_cast<u8>(info->CpuSet.EfficiencyClass));
+                result.push_back({static_cast<u32>(info->CpuSet.Id), core,
+                                  static_cast<u8>(info->CpuSet.EfficiencyClass)});
             }
             offset += info->Size;
+        }
+        return result;
+    }();
+    return processors;
+}
+
+const WindowsCpuSets& CpuSets() {
+    static const WindowsCpuSets sets = [] {
+        WindowsCpuSets result;
+        if (const char* text = std::getenv("EDEN_HYBRID_CORES");
+            text != nullptr && std::strtol(text, nullptr, 10) == 0) {
+            LOG_INFO(Common, "Hybrid core placement off (EDEN_HYBRID_CORES=0)");
+            return result;
+        }
+        result.processors = WindowsProcessors();
+        u8 best = 0;
+        for (const Common::LogicalProcessor& processor : result.processors) {
+            best = (std::max)(best, processor.efficiency_class);
         }
         for (const Common::LogicalProcessor& processor : result.processors) {
             (processor.efficiency_class == best ? result.performance : result.efficiency)
                 .push_back(processor.id);
         }
-        // About ten time-critical threads (six guest cores, GPU front and back, Vulkan worker,
-        // timing, fencing) crowd fewer performance processors: an i5-1235U (2 P cores, 4 logical)
-        // ran Ocarina of Time at 9.3 FPS with them kept there, 11.5 FPS with the placement off.
-        constexpr size_t MinPerformanceProcessors = 8;
-        const bool few_performance = result.performance.size() < MinPerformanceProcessors;
+        // About twelve busy threads crowd fewer performance processors: an i5-1235U (2 P cores,
+        // 4 logical) ran Ocarina of Time at 9.3 FPS with them kept there, 11.5 FPS with the
+        // placement off, and a Core Ultra 9 275HX (8 P cores) was slow with them on its 8.
+        const size_t fast = Common::FastLogicalProcessors();
+        const bool few_performance = !Common::FitsBusyThreads(fast);
         result.hybrid = !result.efficiency.empty() && !few_performance;
         if (!result.efficiency.empty() && few_performance) {
             LOG_INFO(Common,
                      "Hybrid CPU with {} performance logical processors (fewer than {}): "
                      "threads are left to Windows",
-                     result.performance.size(), MinPerformanceProcessors);
+                     fast, Common::BusyThreads);
         }
         if (result.hybrid) {
             LOG_INFO(Common,
@@ -728,7 +740,39 @@ void SetCurrentThreadToPerformanceCores() {
 #endif
 }
 
+std::size_t FastLogicalProcessors() {
+    static const std::size_t count = [] {
+        std::size_t detected{};
+#ifdef _WIN32
+        detected = CountFastLogical(WindowsProcessors());
+#elif defined(__linux__) && !defined(__ANDROID__)
+        detected = CountFastLogical(LinuxProcessors());
+#endif
+        if (detected == 0) {
+            detected = (std::max)(std::thread::hardware_concurrency(), 1U);
+        }
+        std::size_t used = detected;
+        if (const char* text = std::getenv("EDEN_NX2_FAST_CPUS")) {
+            used = (std::max)(static_cast<std::size_t>(std::strtoul(text, nullptr, 10)),
+                              std::size_t{1});
+        }
+        LOG_INFO(Common, "Thread plan: {} fast logical processors{} for about {} busy threads: {}",
+                 used,
+                 used != detected ? fmt::format(" (EDEN_NX2_FAST_CPUS, {} detected)", detected)
+                                  : std::string{},
+                 BusyThreads,
+                 FitsBusyThreads(used) ? "time-critical threads may stay on them"
+                                       : "threads are left to the OS, GPU threads are not "
+                                         "pinned and HostTiming does not spin");
+        return used;
+    }();
+    return count;
+}
+
 void PinCurrentThread(PinnedRole role) {
+    if (!FitsBusyThreads(FastLogicalProcessors())) {
+        return; // FastLogicalProcessors logged why
+    }
 #ifdef _WIN32
     struct PinnedCpuSets {
         std::vector<ULONG> front;
