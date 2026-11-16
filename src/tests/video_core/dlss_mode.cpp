@@ -16,6 +16,34 @@ TEST_CASE("The Duskbloods runs NVIDIA's preset in place of the default M", "[dls
     STATIC_REQUIRE(Mode::EffectivePreset(0x04007EF01F8AE000ULL, Preset::M, false) == Preset::M);
 }
 
+TEST_CASE("The Duskbloods offers only the DLSS modes its render region fits", "[dlss_mode]") {
+    constexpr u64 dusk = Mode::DuskbloodsProgramId;
+    STATIC_REQUIRE(Mode::EffectiveQuality(dusk, Quality::Native) == Quality::Automatic);
+    STATIC_REQUIRE(Mode::EffectiveQuality(dusk, Quality::UltraPerformance) == Quality::Automatic);
+    STATIC_REQUIRE(Mode::EffectiveQuality(dusk, Quality::Quality) == Quality::Quality);
+    STATIC_REQUIRE(Mode::EffectiveQuality(0x04007EF01F8AE000ULL, Quality::Native) ==
+                   Quality::Native);
+}
+
+TEST_CASE("Split scale sizes the upscaler output by the mode, at most the target", "[dlss_mode]") {
+    constexpr Mode::Extent render{1108, 624};
+    constexpr Mode::Extent target{3840, 2160};
+    constexpr auto automatic = Mode::SplitOutput(Quality::Automatic, render, target);
+    STATIC_REQUIRE(automatic.width == 2161);
+    STATIC_REQUIRE(automatic.height == 1217);
+    constexpr auto quality = Mode::SplitOutput(Quality::Quality, render, target);
+    STATIC_REQUIRE(quality.width == 1662);
+    STATIC_REQUIRE(quality.height == 936);
+    // A render region already close to the target goes straight to it.
+    constexpr auto big = Mode::SplitOutput(Quality::Automatic, {2216, 1248}, target);
+    STATIC_REQUIRE(big.width == 3840);
+    STATIC_REQUIRE(big.height == 2160);
+    // The aspect follows the render region when one axis reaches the target first.
+    constexpr auto wide = Mode::SplitOutput(Quality::Automatic, {1920, 600}, {2560, 1440});
+    STATIC_REQUIRE(wide.width == 2560);
+    STATIC_REQUIRE(wide.height == 800);
+}
+
 TEST_CASE("DLSS settings preserve old profiles and per-game overrides", "[dlss_mode]") {
     REQUIRE(Settings::values.nvidia_dlss_preset.GetDefault() == Settings::NvidiaDlssPreset::M);
     REQUIRE(Settings::values.nvidia_dlss_quality.GetDefault() == Quality::Automatic);

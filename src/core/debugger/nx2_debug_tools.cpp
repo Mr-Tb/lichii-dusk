@@ -570,6 +570,15 @@ json LiveJson(const Perf::LiveState& live) {
         {"frames_ahead", control(live.frames_ahead)},
         {"fence_batch", control(live.fence_batch)},
         {"sync_submit", control(live.sync_submit)},
+        {"dlss_tight", control(live.dlss_tight)},
+        {"dlss_hdr", control(live.dlss_hdr)},
+        {"dlss_auto_exposure", control(live.dlss_auto_exposure)},
+        {"dlss_preset", live.dlss_preset < 0
+                            ? json("default")
+                            : json(Settings::CanonicalizeEnum(
+                                  static_cast<Settings::NvidiaDlssPreset>(live.dlss_preset)))},
+        {"dusk_dlss_m", control(live.dusk_dlss_m)},
+        {"split_scale", control(live.split_scale)},
         {"alias", [&] {
              json alias = json::object();
              for (size_t i = 0; i < Perf::AliasNames.size(); ++i) {
@@ -689,6 +698,29 @@ json PerfFlip(ToolState& state, const json& params) {
         live.verify = number() == 1;
     } else if (control == "alias_sync_always") {
         live.alias_sync = number(); // "default": The Duskbloods' images of at most 16x16
+    } else if (control == "dlss_tight") {
+        live.dlss_tight = number();
+    } else if (control == "dlss_hdr") {
+        live.dlss_hdr = number();
+    } else if (control == "dlss_auto_exposure") {
+        live.dlss_auto_exposure = number();
+    } else if (control == "dusk_dlss_m") {
+        live.dusk_dlss_m = number();
+    } else if (control == "split_scale") {
+        live.split_scale = number();
+    } else if (control == "dlss_preset") {
+        // "default" follows the setting; a letter (M, K, J, ...) or "nvidia" overrides it.
+        const std::string text = value.get<std::string>();
+        if (text == "default") {
+            live.dlss_preset = -1;
+        } else {
+            const std::string name = text == "nvidia" ? std::string{"NvidiaDefault"} : text;
+            const auto preset = Settings::ToEnum<Settings::NvidiaDlssPreset>(name);
+            if (Settings::CanonicalizeEnum(preset) != name) {
+                throw std::runtime_error{"dlss_preset values: default, nvidia, M, K, L, J, E, F"};
+            }
+            live.dlss_preset = static_cast<int>(preset);
+        }
     } else if (const auto alias_it = std::ranges::find(Perf::AliasNames, control);
                alias_it != Perf::AliasNames.end()) {
         const u32 bit = 1u << static_cast<u32>(alias_it - Perf::AliasNames.begin());
@@ -713,7 +745,9 @@ json PerfFlip(ToolState& state, const json& params) {
         throw std::runtime_error{"unknown control \"" + control +
                                  "\": inline_defer, uboreuse, frames_ahead, fence_batch, "
                                  "sync_submit, verify, backx, backx.<piece>, alias_sync_always, "
-                                 "alias_full_resolve, alias_resync_upload, alias_diag"};
+                                 "alias_full_resolve, alias_resync_upload, alias_diag, "
+                                 "dlss_tight, dlss_hdr, dlss_auto_exposure, dlss_preset, "
+                                 "dusk_dlss_m, split_scale"};
     }
     return ApplyLiveParams(state, params, live);
 }

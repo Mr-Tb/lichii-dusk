@@ -184,6 +184,7 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 
 // Video Core //
 #include "video_core/gpu.h"
+#include "video_core/dlss_mode.h"
 #include "video_core/renderer_base.h"
 #include "video_core/shader_notify.h"
 #ifdef EGLANTINE_STREAMLINE
@@ -416,7 +417,16 @@ std::optional<DlssQuality> SelectedUpscaler() {
     return dlss ? std::optional{Settings::values.nvidia_dlss_quality.GetValue()} : std::nullopt;
 }
 
+/// A DLSS mode the running game can never use (The Duskbloods: DLAA, Ultra Performance).
+bool UpscalerUnfit(std::optional<DlssQuality> choice) {
+    return choice && VideoCommon::DlssMode::EffectiveQuality(Settings::GetCurrentProgramID(),
+                                                             *choice) != *choice;
+}
+
 bool UpscalerAllowed(std::optional<DlssQuality> choice) {
+    if (UpscalerUnfit(choice)) {
+        return false;
+    }
     if (UpscalerEnv() == "fsr") {
         return !choice;
     }
@@ -1198,6 +1208,9 @@ void MainWindow::InitializeWidgets() {
                 QMenu context_menu;
                 const auto selected = SelectedUpscaler();
                 for (const auto& choice : UPSCALERS) {
+                    if (UpscalerUnfit(choice)) {
+                        continue; // the button's tooltip says why
+                    }
                     QAction* const action = context_menu.addAction(
                         UpscalerName(choice), [this, choice] { SetUpscaler(choice); });
                     action->setCheckable(true);
@@ -5508,6 +5521,12 @@ void MainWindow::UpdateFilterText() {
     const auto filter_text = ConfigurationShared::TranslateMapText(
         translator, ConfigurationShared::scaling_filter_texts_map.find(filter)->second);
     filter_status_button->setText(filter_text.toUpper());
+    const auto& resolution = Settings::values.resolution_info;
+    filter_status_button->setToolTip(
+        resolution.up_scale > (1U << resolution.down_shift)
+            ? tr("Above 1x the frame is area-sampled whenever it is larger than the window, "
+                 "whatever this filter is; the filter applies when it is smaller.")
+            : QString());
 }
 
 void MainWindow::UpdateAAText() {
@@ -5705,6 +5724,11 @@ void MainWindow::UpdateUpscalerButton() {
     }
     if (UpscalerEnv() == "dlss") {
         tooltip += tr(" EDEN_NX2_DLSS_REPLACEMENT=dlss keeps DLSS on.");
+    }
+    if (UpscalerUnfit(DlssQuality::Native)) {
+        tooltip += tr("\nThis game renders its own region of about 58% of the output and sizes it "
+                      "itself, so DLAA and Ultra Performance cannot fit it and are not offered; "
+                      "the DLSS mode picks NVIDIA's tuning for that region.");
     }
     upscaler_status_button->setText(text);
     upscaler_status_button->setToolTip(

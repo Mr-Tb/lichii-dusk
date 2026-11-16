@@ -144,6 +144,13 @@ struct LiveState {
     /// SynchronizeAliases walks the aliases even when no alias tick is newer: -1 (default) for
     /// The Duskbloods' images of at most 16x16, 0 never, 1 always (EDEN_NX2_ALIAS_SYNC_ALWAYS)
     int alias_sync = -1;
+    // Upscaler controls (-1: the default described at each use)
+    int dlss_tight = -1;         ///< DLSS reads render-sized copies of its inputs at 0,0
+    int dlss_hdr = -1;           ///< DLSS colorBuffersHDR (EDEN_NX2_DLSS_HDR)
+    int dlss_auto_exposure = -1; ///< DLSS useAutoExposure (EDEN_NX2_DLSS_AUTO_EXPOSURE)
+    int dlss_preset = -1;        ///< Settings::NvidiaDlssPreset value over the setting
+    int dusk_dlss_m = -1;        ///< The Duskbloods runs preset M as is (EDEN_NX2_DUSK_DLSS_M)
+    int split_scale = -1;        ///< The Duskbloods' upscaler inputs stay at 1x (EDEN_NX2_DUSK_SPLIT)
 
     [[nodiscard]] std::uint32_t Effective() const noexcept {
         return named | (verify ? VerifyMask : 0);
@@ -161,6 +168,12 @@ inline std::atomic<int> g_fence_batch{-1};
 inline std::atomic<int> g_sync_submit{-1};
 inline std::atomic<std::uint32_t> g_alias{};
 inline std::atomic<int> g_alias_sync{-1};
+inline std::atomic<int> g_dlss_tight{-1};
+inline std::atomic<int> g_dlss_hdr{-1};
+inline std::atomic<int> g_dlss_auto_exposure{-1};
+inline std::atomic<int> g_dlss_preset{-1};
+inline std::atomic<int> g_dusk_dlss_m{-1};
+inline std::atomic<int> g_split_scale{-1};
 /// Live changes requested / applied, and the rasterizer frame of the last applied one.
 inline std::atomic<std::uint64_t> g_live_requested{};
 inline std::atomic<std::uint64_t> g_live_applied{};
@@ -183,6 +196,12 @@ inline void StoreLive(const LiveState& state) {
     g_sync_submit.store(state.sync_submit, std::memory_order_relaxed);
     g_alias.store(state.alias, std::memory_order_relaxed);
     g_alias_sync.store(state.alias_sync, std::memory_order_relaxed);
+    g_dlss_tight.store(state.dlss_tight, std::memory_order_relaxed);
+    g_dlss_hdr.store(state.dlss_hdr, std::memory_order_relaxed);
+    g_dlss_auto_exposure.store(state.dlss_auto_exposure, std::memory_order_relaxed);
+    g_dlss_preset.store(state.dlss_preset, std::memory_order_relaxed);
+    g_dusk_dlss_m.store(state.dusk_dlss_m, std::memory_order_relaxed);
+    g_split_scale.store(state.split_scale, std::memory_order_relaxed);
 }
 
 [[nodiscard]] inline LiveState CurrentLive() {
@@ -196,6 +215,12 @@ inline void StoreLive(const LiveState& state) {
         .sync_submit = g_sync_submit.load(std::memory_order_relaxed),
         .alias = g_alias.load(std::memory_order_relaxed),
         .alias_sync = g_alias_sync.load(std::memory_order_relaxed),
+        .dlss_tight = g_dlss_tight.load(std::memory_order_relaxed),
+        .dlss_hdr = g_dlss_hdr.load(std::memory_order_relaxed),
+        .dlss_auto_exposure = g_dlss_auto_exposure.load(std::memory_order_relaxed),
+        .dlss_preset = g_dlss_preset.load(std::memory_order_relaxed),
+        .dusk_dlss_m = g_dusk_dlss_m.load(std::memory_order_relaxed),
+        .split_scale = g_split_scale.load(std::memory_order_relaxed),
     };
 }
 
@@ -243,10 +268,14 @@ inline bool ApplyLive(std::uint64_t frame) {
     g_live_applied.store(requested, std::memory_order_release);
     LOG_INFO(HW_GPU,
              "Nx2Perf live change #{} at frame {}: verify={} dusk_off={:#x} uboreuse={} "
-             "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} sites: {}",
+             "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} "
+             "dlss_tight={} dlss_hdr={} dlss_auto_exposure={} dlss_preset={} dusk_dlss_m={} "
+             "split_scale={} sites: {}",
              requested, frame, state.verify ? 1 : 0, state.dusk_off, state.uboreuse,
              state.frames_ahead, state.fence_batch, state.sync_submit, state.alias,
-             state.alias_sync, SitesText(state.Effective()));
+             state.alias_sync, state.dlss_tight, state.dlss_hdr, state.dlss_auto_exposure,
+             state.dlss_preset, state.dusk_dlss_m, state.split_scale,
+             SitesText(state.Effective()));
     return true;
 }
 
@@ -275,6 +304,12 @@ inline void ReadSwitch() {
     }
     if (const char* value = std::getenv("EDEN_NX2_ALIAS_SYNC_ALWAYS"); value && *value) {
         state.alias_sync = value[0] == '1' ? 1 : 0;
+    }
+    if (const char* value = std::getenv("EDEN_NX2_DUSK_SPLIT"); value && *value) {
+        state.split_scale = value[0] == '1' ? 1 : 0;
+    }
+    if (const char* value = std::getenv("EDEN_NX2_DLSS_TIGHT"); value && *value) {
+        state.dlss_tight = value[0] == '1' ? 1 : 0;
     }
     StoreLive(state);
     LOG_INFO(HW_GPU, "Nx2Perf sites (PERF_VERIFY={}, alias={:#x}, alias_sync={}): {}",
@@ -349,6 +384,49 @@ inline void FlushAliasStats(std::uint64_t now_ms) {
                 std::to_string(count);
     }
     LOG_INFO(HW_GPU, "Alias sync (images <= 16x16, last second): {}", text);
+}
+
+/// Sync submits (nvhost_gpu, EDEN_NX2_SYNC_SUBMIT): time the guest thread waited for its fence.
+inline std::atomic<std::uint64_t> g_sync_submit_wait_ns{};
+inline std::atomic<std::uint64_t> g_sync_submit_waits{};
+/// Temporal upscales (TextureCacheRuntime): evaluations, history resets, and which upscaler ran
+/// last (0 none, 1 FSR 3.1, 2 NVIDIA DLSS).
+inline std::atomic<std::uint64_t> g_upscales{};
+inline std::atomic<std::uint64_t> g_upscale_resets{};
+inline std::atomic<int> g_upscaler{};
+/// Host commit left (texture cache memory check), for the perf summary.
+inline std::atomic<std::uint64_t> g_commit_left_mib{};
+
+/// Resolution scaler changes of images (texture cache thread): scaled up, scaled down, and flips
+/// (scaled the other way within 120 frames of the last change, which resamples the contents).
+inline std::atomic<std::uint64_t> g_rescale_up{};
+inline std::atomic<std::uint64_t> g_rescale_down{};
+inline std::atomic<std::uint64_t> g_rescale_flips{};
+/// Image copies between a scaled and an unscaled image, brought to one scale first.
+inline std::atomic<std::uint64_t> g_rescale_mismatches{};
+
+inline void NoteRescale(bool up, bool flip) {
+    (up ? g_rescale_up : g_rescale_down).fetch_add(1, std::memory_order_relaxed);
+    if (flip) {
+        g_rescale_flips.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+/// Rasterizer thread, each frame end: at most once a second, logs the changes when there were any.
+inline void FlushRescaleStats(std::uint64_t now_ms) {
+    static std::uint64_t last_ms{};
+    if (now_ms - last_ms < 1000) {
+        return;
+    }
+    last_ms = now_ms;
+    const std::uint64_t up = g_rescale_up.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t down = g_rescale_down.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t flips = g_rescale_flips.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t mismatches = g_rescale_mismatches.exchange(0, std::memory_order_relaxed);
+    if (up + down + mismatches != 0) {
+        LOG_INFO(HW_GPU, "Rescale (last second): up={} down={} flips={} mismatched_copies={}", up,
+                 down, flips, mismatches);
+    }
 }
 
 } // namespace VideoCommon::Nx2Perf

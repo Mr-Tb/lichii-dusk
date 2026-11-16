@@ -102,6 +102,15 @@ public:
 
 private:
     void CreateOutput(VkExtent2D upscale_size);
+    /// Render-sized copies of the inputs at 0,0 (dlss_tight), made when the size or a format
+    /// changes.
+    void CreateTightInputs(const Inputs& in);
+
+    struct TightImage {
+        vk::Image image;
+        vk::ImageView view;
+        VkFormat format{};
+    };
 
     const Device& device;
     Scheduler& scheduler;
@@ -114,8 +123,13 @@ private:
     /// render size inside it keeps the mode and the history.
     VideoCommon::DlssMode::Range mode_range{};
     bool hdr_input = true;
+    bool hdr_option{};
+    bool auto_exposure_option{};
+    bool tight_inputs{};
     Settings::NvidiaDlssQuality quality_mode{};
     Settings::NvidiaDlssPreset model_preset{};
+    std::array<TightImage, 3> tight{}; ///< colour, depth, motion
+    VkExtent2D tight_extent{};
     Settings::NvidiaDlssQuality evaluated_mode{}; ///< Recorded on the scheduler's worker
     u32 frame_index{};
     vk::Image output_image;
