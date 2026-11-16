@@ -38,6 +38,7 @@
 #include "common/thread_worker.h"
 #include "video_core/compatible_formats.h"
 #include "video_core/control/channel_state_cache.h"
+#include "video_core/dlss_mode.h"
 #include "video_core/delayed_destruction_ring.h"
 #include "video_core/engines/fermi_2d.h"
 #include "video_core/game_dlss_status.h"
@@ -668,7 +669,14 @@ private:
                                                       bool mark_as_modified);
 
     bool ImageCanRescale(ImageBase& image);
+    /// The Duskbloods' split scale is on (see DlssMode::SplitScaleActive).
+    [[nodiscard]] static bool SplitScale() {
+        const auto& resolution = Settings::values.resolution_info;
+        return DlssMode::SplitScaleActive(Settings::GetCurrentProgramID(),
+                                          resolution.up_scale > (1U << resolution.down_shift));
+    }
     void InvalidateScale(Image& image);
+    void NoteRescale(Image& image, bool up);
     bool ScaleUp(Image& image);
     bool ScaleDown(Image& image);
     u64 GetScaledImageSizeBytes(const ImageBase& image);

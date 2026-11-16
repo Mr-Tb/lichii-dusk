@@ -133,6 +133,14 @@ Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
                 .pipelineStatistics = 0,
             });
             trace_submissions.resize(TraceMaxSubmissions);
+            split_query_pool = device.GetLogical().CreateQueryPool({
+                .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .queryType = VK_QUERY_TYPE_TIMESTAMP,
+                .queryCount = SplitFrames * 3,
+                .pipelineStatistics = 0,
+            });
             if (Common::DkbFrameTrace::Enabled()) {
                 trace_work_pool = device.GetLogical().CreateQueryPool({
                     .sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
@@ -312,6 +320,82 @@ std::optional<double> Scheduler::GpuBusyMs() const {
         return std::nullopt;
     }
     return gpu_busy->ms;
+}
+
+void Scheduler::MarkGpu(GpuMark mark) {
+    if (!split_query_pool) {
+        return;
+    }
+    RecordWithUploadBuffer([this, mark](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
+        const u32 slot = static_cast<u32>(split_frame % SplitFrames);
+        if (split_slot_frame[slot] != split_frame) {
+            split_slot_frame[slot] = split_frame;
+            split_slot_marks[slot] = 0;
+        }
+        const u32 index = static_cast<u32>(mark);
+        const u32 query = slot * 3 + index;
+        // The upload buffer runs first in the same submission; queries can't be reset in a pass.
+        upload_cmdbuf.ResetQueryPool(*split_query_pool, query, 1);
+        cmdbuf.WriteTimestamp(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, *split_query_pool, query);
+        split_slot_marks[slot] |= static_cast<u8>(1u << index);
+        if (mark == GpuMark::Present) {
+            if (split_frame >= 4) {
+                ReadGpuSplit(split_frame - 4);
+            }
+            ++split_frame;
+        }
+    });
+}
+
+void Scheduler::ReadGpuSplit(u64 frame) {
+    const u32 slot = static_cast<u32>(frame % SplitFrames);
+    const u32 previous = static_cast<u32>((frame + SplitFrames - 1) % SplitFrames);
+    if (frame == 0 || split_slot_frame[slot] != frame || split_slot_marks[slot] != 7 ||
+        split_slot_frame[previous] != frame - 1 || (split_slot_marks[previous] & 4) == 0) {
+        return;
+    }
+    struct Result {
+        u64 timestamp;
+        u64 available;
+    };
+    std::array<Result, 3> results{};
+    Result previous_present{};
+    const auto flags = VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT;
+    if (device.GetLogical().GetQueryResults(*split_query_pool, slot * 3, 3, sizeof(results),
+                                            results.data(), sizeof(Result), flags) != VK_SUCCESS ||
+        device.GetLogical().GetQueryResults(*split_query_pool, previous * 3 + 2, 1,
+                                            sizeof(previous_present), &previous_present,
+                                            sizeof(Result), flags) != VK_SUCCESS) {
+        return;
+    }
+    if (!results[0].available || !results[1].available || !results[2].available ||
+        !previous_present.available) {
+        return;
+    }
+    const auto ms = [this](u64 begin, u64 end) {
+        return static_cast<double>(
+                   Common::DkbFrameTrace::TimestampDelta(begin, end, trace_timestamp_bits)) *
+               trace_timestamp_period / 1e6;
+    };
+    const double upscale = ms(results[0].timestamp, results[1].timestamp);
+    std::scoped_lock lock{split_mutex};
+    ++split_totals.frames;
+    split_totals.pre_ms += ms(previous_present.timestamp, results[0].timestamp);
+    split_totals.upscale_ms += upscale;
+    split_totals.post_ms += ms(results[1].timestamp, results[2].timestamp);
+    split_totals.upscale_max_ms = std::max(split_totals.upscale_max_ms, upscale);
+}
+
+Scheduler::GpuSplit Scheduler::TakeGpuSplit() {
+    std::scoped_lock lock{split_mutex};
+    GpuSplit result = std::exchange(split_totals, GpuSplit{});
+    if (result.frames != 0) {
+        const double frames = static_cast<double>(result.frames);
+        result.pre_ms /= frames;
+        result.upscale_ms /= frames;
+        result.post_ms /= frames;
+    }
+    return result;
 }
 
 void Scheduler::DispatchWork() {

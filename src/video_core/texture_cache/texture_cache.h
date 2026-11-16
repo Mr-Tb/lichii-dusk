@@ -469,6 +469,20 @@ void TextureCache<P>::TickFrame() {
                     const u64 change = critical_memory > logged_critical_memory
                                            ? critical_memory - logged_critical_memory
                                            : logged_critical_memory - critical_memory;
+                    if (commit_room) {
+                        Nx2Perf::g_commit_left_mib.store(*commit_room >> 20,
+                                                         std::memory_order_relaxed);
+                        // Little commit left: the cache shrinks and evicts all the time.
+                        static auto warned = std::chrono::steady_clock::time_point{};
+                        const auto now = std::chrono::steady_clock::now();
+                        if (*commit_room < 2_GiB && now - warned > std::chrono::minutes{1}) {
+                            warned = now;
+                            LOG_WARNING(HW_GPU,
+                                        "Setup warning: {} MiB of host commit left: close other "
+                                        "programs or raise the page file size",
+                                        *commit_room >> 20);
+                        }
+                    }
                     const bool log = budget_check_frames == 1 || change >= 256_MiB;
                     if (log) {
                         logged_critical_memory = critical_memory;
@@ -1804,7 +1818,21 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         const auto rescaled = [&](ImageId id) {
             return True(slot_images[id].flags & ImageFlagBits::Rescaled);
         };
-        if (rescaled(src_id) || rescaled(motion_id) || rescaled(dst_id) ||
+        if (depth_target && SplitScale()) {
+            // Split scale: the upscaler's inputs, and the passes that draw them with them, stay
+            // at 1x; its output (and what follows) keeps the resolution scale.
+            for (const ImageId id : {src_id, motion_id, depth_id}) {
+                if (id) {
+                    slot_images[id].flags |= ImageFlagBits::SplitNative;
+                    if (rescaled(id)) {
+                        ScaleDown(slot_images[id]);
+                    }
+                }
+            }
+            if (!rescaled(dst_id) && ImageCanRescale(slot_images[dst_id])) {
+                ScaleUp(slot_images[dst_id]);
+            }
+        } else if (rescaled(src_id) || rescaled(motion_id) || rescaled(dst_id) ||
             (depth_id && rescaled(depth_id))) {
             for (const ImageId id : {src_id, motion_id, dst_id, depth_id}) {
                 if (id && !rescaled(id) && ImageCanRescale(slot_images[id])) {
@@ -2755,6 +2783,9 @@ bool TextureCache<P>::ImageCanRescale(ImageBase& image) {
     if (!image.info.rescaleable) {
         return false;
     }
+    if (True(image.flags & ImageFlagBits::SplitNative) && SplitScale()) {
+        return false;
+    }
     if (Settings::values.resolution_info.downscale && !image.info.downscaleable) {
         return false;
     }
@@ -3051,6 +3082,7 @@ bool TextureCache<P>::ScaleUp(Image& image) {
     if (!rescaled) {
         return false;
     }
+    NoteRescale(image, true);
     InvalidateScale(image);
     return true;
 }
@@ -3061,8 +3093,17 @@ bool TextureCache<P>::ScaleDown(Image& image) {
     if (!rescaled) {
         return false;
     }
+    NoteRescale(image, false);
     InvalidateScale(image);
     return true;
+}
+
+template <class P>
+void TextureCache<P>::NoteRescale(Image& image, bool up) {
+    const bool flip =
+        image.rescale_change_tick != 0 && frame_tick + 1 - image.rescale_change_tick < 120;
+    image.rescale_change_tick = frame_tick + 1;
+    Nx2Perf::NoteRescale(up, flip);
 }
 
 template <class P>
@@ -4512,6 +4553,18 @@ void TextureCache<P>::CopyImage(ImageId dst_id, ImageId src_id, std::vector<Imag
     }
     // As in BlitImage: land a parked deferred clear before the copy overwrites the image.
     runtime.FlushDeferredClear();
+    // Both at one scale. Callers scale the two together, but a ScaleUp can fail (no memory for the
+    // scaled copy, or an alias that can't rescale): the copy then put 1x texels 1:1 into a 2x
+    // image, or 2x regions into a 1x one (an RX 9070 XT at 2x with little commit left: the window
+    // image's bottom turned to garbage blocks with a 1x copy of the scene inside).
+    if (True(src.flags & ImageFlagBits::Rescaled) != True(dst.flags & ImageFlagBits::Rescaled)) {
+        Image& lower = True(src.flags & ImageFlagBits::Rescaled) ? dst : src;
+        Image& higher = True(src.flags & ImageFlagBits::Rescaled) ? src : dst;
+        if (!(ImageCanRescale(lower) && ScaleUp(lower))) {
+            ScaleDown(higher);
+        }
+        Nx2Perf::g_rescale_mismatches.fetch_add(1, std::memory_order_relaxed);
+    }
     const bool is_rescaled = True(src.flags & ImageFlagBits::Rescaled);
     if (is_rescaled) {
         ASSERT(True(dst.flags & ImageFlagBits::Rescaled));

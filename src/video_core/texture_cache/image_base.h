@@ -60,6 +60,8 @@ enum class ImageFlagBits : u32 {
     /// device memory when the guest memory under it can hold data (Image::BindTiles), and only
     /// the parts written are uploaded.
     SparseTiles = 1 << 23,
+    /// An input of The Duskbloods' upscaler: it stays at 1x while split scale is on.
+    SplitNative = 1 << 24,
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
@@ -116,6 +118,7 @@ struct ImageBase {
     /// CpuModified. Empty while CpuModified means all of it that can hold data.
     std::vector<std::pair<u64, u64>> dirty_ranges;
     u64 scale_tick = 0;
+    u64 rescale_change_tick = 0; ///< frame_tick + 1 of the last ScaleUp/ScaleDown that changed it
     bool has_scaled = false;
 
     /// The channel and GPU address space whose page table RegisterImage put the image in.

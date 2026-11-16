@@ -99,6 +99,22 @@ public:
     }
     /// Host GPU busy time of the last sampled frame, nullopt when none was taken in 3 s.
     [[nodiscard]] std::optional<double> GpuBusyMs() const;
+
+    /// GPU time around a temporal upscaler: timestamps at its start and end and at each present.
+    enum class GpuMark : u8 { UpscaleBegin, UpscaleEnd, Present };
+    /// Recording thread: timestamps this point of the frame (cheap; nothing waits on it).
+    void MarkGpu(GpuMark mark);
+    /// GPU ms per frame since the last call, for frames that ran an upscaler: before it (from the
+    /// previous present), the upscaler itself, and after it up to the present. GPU wall time,
+    /// which is the GPU's work when the GPU is the bottleneck.
+    struct GpuSplit {
+        u64 frames{};
+        double pre_ms{};
+        double upscale_ms{};
+        double post_ms{};
+        double upscale_max_ms{};
+    };
+    [[nodiscard]] GpuSplit TakeGpuSplit();
     void TraceGraphicsPipeline(const std::array<u64, 6>& hashes);
     void TraceComputePipeline(u64 hash);
     /// Worker thread, inside a recorded command: timestamps one draw or dispatch of a sampled
@@ -556,6 +572,16 @@ private:
     };
     mutable std::mutex gpu_busy_mutex;
     std::optional<GpuBusySample> gpu_busy;
+
+    // MarkGpu: 8 frames of 3 timestamps, read 4 presents later (worker thread only).
+    static constexpr u32 SplitFrames = 8;
+    vk::QueryPool split_query_pool;
+    u64 split_frame{};
+    std::array<u64, SplitFrames> split_slot_frame{};
+    std::array<u8, SplitFrames> split_slot_marks{};
+    void ReadGpuSplit(u64 frame);
+    std::mutex split_mutex;
+    GpuSplit split_totals;
 
     VideoCommon::QueryCacheBase<QueryCacheParams>* query_cache = nullptr;
 

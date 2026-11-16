@@ -267,10 +267,23 @@ public:
     /// The game DLSS network's health check (ProbeGameDlssOutput), created on first use.
     std::unique_ptr<DlssNetworkProbe> dlss_network_probe;
     std::optional<std::chrono::steady_clock::time_point> fsr3_last_evaluation;
+    /// Smoothed time between upscales: a gap of 4 of these (at least 250 ms) resets the history.
+    f32 upscale_interval_ms = 1000.0f / 30.0f;
 
-    /// Draws an upscaler's RGBA16F output into the DLSS output and returns it to GENERAL.
+    /// Split scale: the upscaler's output size, kept while the render size moves by under 1/16.
+    [[nodiscard]] VkExtent2D SplitExtent(Settings::NvidiaDlssQuality mode,
+                                         std::array<u32, 2> render_size, VkExtent2D target);
+    struct {
+        Settings::NvidiaDlssQuality mode{};
+        std::array<u32, 2> render{};
+        VkExtent2D target{};
+        VkExtent2D extent{};
+    } split_output;
+
+    /// Draws an upscaler's RGBA16F output (source_size of it) over the DLSS output and returns it
+    /// to GENERAL.
     void DrawUpscaledOutput(Framebuffer* dst_framebuffer, VkImageView view, VkImage image,
-                            VkSampler sampler);
+                            VkSampler sampler, VkExtent2D source_size);
 #ifdef EGLANTINE_STREAMLINE
     /// NVIDIA's DLSS (through NVIDIA Streamline) in place of the game's,
     /// before FSR 3.1, when the setting is on. Returns false to fall back to FSR 3.1.
