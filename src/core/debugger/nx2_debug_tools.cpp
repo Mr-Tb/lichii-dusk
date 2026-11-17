@@ -629,7 +629,6 @@ json LiveJson(const Perf::LiveState& live) {
                             : json(Settings::CanonicalizeEnum(
                                   static_cast<Settings::NvidiaDlssPreset>(live.dlss_preset)))},
         {"dusk_dlss_m", control(live.dusk_dlss_m)},
-        {"split_scale", control(live.split_scale)},
         {"rescale_pin", control(live.rescale_pin)},
         {"pin_main", control(live.pin_main)},
         {"pin_strict", control(live.pin_strict)},
@@ -764,8 +763,6 @@ json PerfFlip(ToolState& state, const json& params) {
         live.dlss_auto_exposure = number();
     } else if (control == "dusk_dlss_m") {
         live.dusk_dlss_m = number();
-    } else if (control == "split_scale") {
-        live.split_scale = number();
     } else if (control == "rescale_pin") {
         live.rescale_pin = number(); // "default": The Duskbloods only
     } else if (control == "pin_main") {
@@ -819,7 +816,7 @@ json PerfFlip(ToolState& state, const json& params) {
                                  "sync_submit, verify, backx, backx.<piece>, alias_sync_always, "
                                  "alias_full_resolve, alias_resync_upload, alias_diag, "
                                  "dlss_tight, dlss_hdr, dlss_auto_exposure, dlss_preset, "
-                                 "dusk_dlss_m, split_scale, rescale_pin, pin_main, pin_strict, "
+                                 "dusk_dlss_m, rescale_pin, pin_main, pin_strict, "
                                  "pin_blit, main_partner, pass_timing, sysmix_ahead"};
     }
     return ApplyLiveParams(state, params, live);

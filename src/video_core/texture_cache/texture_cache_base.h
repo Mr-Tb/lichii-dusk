@@ -670,12 +670,6 @@ private:
 
     bool ImageCanRescale(ImageBase& image);
     bool ImageCanRescaleUnpinned(ImageBase& image);
-    /// The Duskbloods' split scale is on (see DlssMode::SplitScaleActive).
-    [[nodiscard]] static bool SplitScale() {
-        const auto& resolution = Settings::values.resolution_info;
-        return DlssMode::SplitScaleActive(Settings::GetCurrentProgramID(),
-                                          resolution.up_scale > (1U << resolution.down_shift));
-    }
     void InvalidateScale(Image& image);
     void NoteRescale(Image& image, bool up, Nx2Perf::RescaleReason reason);
     bool ScaleUp(Image& image, Nx2Perf::RescaleReason reason = Nx2Perf::RescaleReason::Other);
@@ -690,7 +684,7 @@ private:
     /// pin_main: unpins an image.
     void ReleasePin(Image& image);
     /// pin_main: an image The Duskbloods' upscaler took in the last two frames (its colour,
-    /// motion, depth and output; only the output under split scale). Never pinned, and wins
+    /// motion, depth and output). Never pinned, and wins
     /// over pinned partners.
     [[nodiscard]] bool IsMain(const ImageBase& image) const noexcept {
         return pin_main && image.main_tick != 0 && frame_tick <= image.main_tick + 1;
@@ -780,10 +774,9 @@ private:
     /// skip the upload of a new target the clear overwrites whole.
     bool clearing_render_targets = false;
     bool is_rescaling = false;
-    /// rescale_pin: on, and the generation of the pins (a new one when it or split scale changes,
-    /// which lets every pinned image scale again).
+    /// rescale_pin: on, and the generation of the pins (a new one when it changes, which lets
+    /// every pinned image scale again).
     bool pin_active = false;
-    bool pin_split = false;
     bool pin_main = false, pin_strict = false;
     /// frame_tick of the last upscale with a depth target: pins are taken only in gameplay.
     u64 last_upscale_tick = 0;

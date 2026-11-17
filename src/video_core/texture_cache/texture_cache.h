@@ -1042,11 +1042,10 @@ bool TextureCache<P>::RescaleRenderTargets() {
     if (const bool pin = Nx2Perf::LiveOr(Nx2Perf::g_rescale_pin,
                                          Settings::GetCurrentProgramID() ==
                                              DlssMode::DuskbloodsProgramId),
-        split = SplitScale(), main = Nx2Perf::LiveOr(Nx2Perf::g_pin_main, true),
+        main = Nx2Perf::LiveOr(Nx2Perf::g_pin_main, true),
         strict = Nx2Perf::LiveOr(Nx2Perf::g_pin_strict, true);
-        pin != pin_active || split != pin_split || main != pin_main || strict != pin_strict) {
+        pin != pin_active || main != pin_main || strict != pin_strict) {
         pin_active = pin;
-        pin_split = split;
         pin_main = main;
         pin_strict = strict;
         ++pin_generation;
@@ -1870,10 +1869,9 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
             }
         }
         if (depth_target && pin_main) {
-            // pin_main: the upscaler's images are the main frame; under split scale only its
-            // output (the inputs stay at 1x by design).
+            // pin_main: the upscaler's images are the main frame.
             for (const ImageId id : {src_id, motion_id, dst_id, depth_id}) {
-                if (id && (id == dst_id || !SplitScale())) {
+                if (id) {
                     ReleasePin(slot_images[id]);
                     slot_images[id].main_tick = frame_tick + 1;
                 }
@@ -1887,21 +1885,7 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         };
         // Before the upscaler raises it: a colour drawn at 1x and raised here is 1x content.
         const bool src_drawn_scaled = rescaled(src_id);
-        if (depth_target && SplitScale()) {
-            // Split scale: the upscaler's inputs, and the passes that draw them with them, stay
-            // at 1x; its output (and what follows) keeps the resolution scale.
-            for (const ImageId id : {src_id, motion_id, depth_id}) {
-                if (id) {
-                    slot_images[id].flags |= ImageFlagBits::SplitNative;
-                    if (rescaled(id)) {
-                        ScaleDown(slot_images[id], Nx2Perf::RescaleReason::Split);
-                    }
-                }
-            }
-            if (!rescaled(dst_id) && ImageCanRescale(slot_images[dst_id])) {
-                ScaleUp(slot_images[dst_id], Nx2Perf::RescaleReason::Split);
-            }
-        } else if (rescaled(src_id) || rescaled(motion_id) || rescaled(dst_id) ||
+        if (rescaled(src_id) || rescaled(motion_id) || rescaled(dst_id) ||
             (depth_id && rescaled(depth_id))) {
             for (const ImageId id : {src_id, motion_id, dst_id, depth_id}) {
                 if (id && !rescaled(id) && ImageCanRescale(slot_images[id]) &&
@@ -2906,9 +2890,6 @@ bool TextureCache<P>::ImageCanRescaleUnpinned(ImageBase& image) {
     if (!image.info.rescaleable) {
         return false;
     }
-    if (True(image.flags & ImageFlagBits::SplitNative) && SplitScale()) {
-        return false;
-    }
     if (Settings::values.resolution_info.downscale && !image.info.downscaleable) {
         return false;
     }
@@ -3304,8 +3285,6 @@ bool TextureCache<P>::RaiseMainPartners(std::span<const ImageId> ids) {
             why = "pinned";
         } else if (!image.info.rescaleable) {
             why = "info";
-        } else if (True(image.flags & ImageFlagBits::SplitNative) && SplitScale()) {
-            why = "split";
         } else if (Settings::values.resolution_info.downscale) {
             why = "downscale";
         }

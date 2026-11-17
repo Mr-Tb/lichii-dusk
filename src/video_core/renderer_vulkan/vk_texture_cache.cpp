@@ -1859,10 +1859,7 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     if (!WantsTemporalUpscaleDepth()) {
         return false;
     }
-    const VkExtent2D target = dst_framebuffer->RenderArea();
-    const bool split = VideoCommon::DlssMode::SplitScaleActive(
-        Settings::GetCurrentProgramID(), resolution.up_scale > (1U << resolution.down_shift));
-    const VkExtent2D extent = split ? SplitExtent(render_size, target) : target;
+    const VkExtent2D extent = dst_framebuffer->RenderArea();
     // A gap in the evaluations (a menu, a movie, a load) starts the history again. The gap is 4
     // smoothed frame intervals, at least 250 ms: at 8 FPS ordinary frame time spikes passed a
     // fixed 250 ms and restarted the history (a visible pop) several times a minute.
@@ -1948,10 +1945,8 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
         fsr3_unsupported = true;
         return false;
     }
-    const bool stretched = extent.width != target.width || extent.height != target.height;
     DrawUpscaledOutput(dst_framebuffer, fsr3_upscaler->OutputView(), fsr3_upscaler->OutputImage(),
-                       stretched ? fsr3_upscaler->LinearSampler() : fsr3_upscaler->PointSampler(),
-                       extent, !sharpen);
+                       fsr3_upscaler->PointSampler(), extent);
     VideoCommon::Nx2Perf::g_upscaler.store(1, std::memory_order_relaxed);
     static bool logged{};
     if (!logged) {
@@ -1962,32 +1957,12 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     return true;
 }
 
-VkExtent2D TextureCacheRuntime::SplitExtent(std::array<u32, 2> render_size, VkExtent2D target) {
-    auto& kept = split_output;
-    // Kept while the render size grows by under 1/16 or keeps at least half the output.
-    const auto keeps = [](u32 render, u32 kept_render, u32 output) {
-        return render * 16 <= kept_render * 17 && render * 2 >= output;
-    };
-    if (kept.target.width == target.width && kept.target.height == target.height &&
-        kept.extent.width != 0 && keeps(render_size[0], kept.render[0], kept.extent.width) &&
-        keeps(render_size[1], kept.render[1], kept.extent.height)) {
-        return kept.extent;
-    }
-    const auto output = VideoCommon::DlssMode::SplitOutput({render_size[0], render_size[1]},
-                                                           {target.width, target.height});
-    kept = {render_size, target, VkExtent2D{output.width, output.height}};
-    LOG_INFO(Render_Vulkan, "Split scale: {}x{} upscaled to {}x{}, then stretched to {}x{}",
-             render_size[0], render_size[1], output.width, output.height, target.width,
-             target.height);
-    return kept.extent;
-}
-
 void TextureCacheRuntime::DrawUpscaledOutput(Framebuffer* dst_framebuffer, VkImageView view,
                                              VkImage output, VkSampler sampler,
-                                             VkExtent2D source_size, bool sharpen_stretch) {
+                                             VkExtent2D source_size) {
     // Draw the result into the DLSS output, which keeps its own format; the blit leaves the
     // upscaler's output image in SHADER_READ_ONLY_OPTIMAL, so return it to GENERAL for the next
-    // frame. A smaller result (split scale) is stretched over it with the sampler.
+    // frame. A smaller result (DLAA's render-sized one) is stretched over it with the sampler.
     const VkExtent2D extent = dst_framebuffer->RenderArea();
     const Region2D region{
         .start = {0, 0},
@@ -1997,24 +1972,8 @@ void TextureCacheRuntime::DrawUpscaledOutput(Framebuffer* dst_framebuffer, VkIma
         .start = {0, 0},
         .end = {static_cast<s32>(source_size.width), static_cast<s32>(source_size.height)},
     };
-    // EDEN_NX2_SPLIT_SHARPEN=<stops>|off: RCAS strength on the stretch (0 is the strongest).
-    static const std::optional<f32> split_sharpen = []() -> std::optional<f32> {
-        const char* const value = std::getenv("EDEN_NX2_SPLIT_SHARPEN");
-        if (value && std::string_view{value} == "off") {
-            return std::nullopt;
-        }
-        return value ? static_cast<f32>(std::strtod(value, nullptr)) : 0.5f;
-    }();
-    const bool stretched =
-        source_size.width != extent.width || source_size.height != extent.height;
-    if (stretched && sharpen_stretch && split_sharpen) {
-        blit_image_helper.StretchSharpen(dst_framebuffer, view, output, region, source,
-                                         {source_size.width, source_size.height, 1},
-                                         *split_sharpen);
-    } else {
-        blit_image_helper.BlitColor(dst_framebuffer, view, output, sampler, region, source,
-                                    {source_size.width, source_size.height, 1});
-    }
+    blit_image_helper.BlitColor(dst_framebuffer, view, output, sampler, region, source,
+                                {source_size.width, source_size.height, 1});
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([output](vk::CommandBuffer cmdbuf) {
         const VkImageMemoryBarrier barrier{
@@ -2102,11 +2061,8 @@ bool TextureCacheRuntime::UpscaleWithDlss(Framebuffer* dst_framebuffer, ImageVie
         Settings::GetCurrentProgramID(), Settings::GetNvidiaDlssRuntimeSettings().quality);
     const bool native_resolution = quality == Settings::NvidiaDlssQuality::Native;
     const VkExtent2D target = dst_framebuffer->RenderArea();
-    const bool split = VideoCommon::DlssMode::SplitScaleActive(
-        Settings::GetCurrentProgramID(), resolution.up_scale > (1U << resolution.down_shift));
-    const VkExtent2D extent = native_resolution ? VkExtent2D{render_size[0], render_size[1]}
-                              : split           ? SplitExtent(render_size, target)
-                                                : target;
+    const VkExtent2D extent =
+        native_resolution ? VkExtent2D{render_size[0], render_size[1]} : target;
     bool upscaled{};
     try {
         upscaled = dlss_upscaler->Upscale({
@@ -2139,7 +2095,7 @@ bool TextureCacheRuntime::UpscaleWithDlss(Framebuffer* dst_framebuffer, ImageVie
     const bool stretched = extent.width != target.width || extent.height != target.height;
     DrawUpscaledOutput(dst_framebuffer, dlss_upscaler->OutputView(), dlss_upscaler->OutputImage(),
                        stretched ? dlss_upscaler->LinearSampler() : dlss_upscaler->PointSampler(),
-                       extent, true);
+                       extent);
     static bool logged{};
     if (!logged) {
         logged = true;

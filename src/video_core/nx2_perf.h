@@ -153,7 +153,6 @@ struct LiveState {
     int dlss_auto_exposure = -1; ///< DLSS useAutoExposure (EDEN_NX2_DLSS_AUTO_EXPOSURE)
     int dlss_preset = -1;        ///< Settings::NvidiaDlssPreset value over the setting
     int dusk_dlss_m = -1;        ///< The Duskbloods runs preset M as is (EDEN_NX2_DUSK_DLSS_M)
-    int split_scale = -1;        ///< The Duskbloods' upscaler inputs stay at 1x (EDEN_NX2_DUSK_SPLIT)
     /// An image that keeps bouncing between 1x and the resolution scale stays at 1x
     /// (EDEN_NX2_RESCALE_PIN; default: The Duskbloods only)
     int rescale_pin = -1;
@@ -197,7 +196,6 @@ inline std::atomic<int> g_dlss_hdr{-1};
 inline std::atomic<int> g_dlss_auto_exposure{-1};
 inline std::atomic<int> g_dlss_preset{-1};
 inline std::atomic<int> g_dusk_dlss_m{-1};
-inline std::atomic<int> g_split_scale{-1};
 inline std::atomic<int> g_rescale_pin{-1};
 inline std::atomic<int> g_pin_main{-1};
 inline std::atomic<int> g_pin_strict{-1};
@@ -232,7 +230,6 @@ inline void StoreLive(const LiveState& state) {
     g_dlss_auto_exposure.store(state.dlss_auto_exposure, std::memory_order_relaxed);
     g_dlss_preset.store(state.dlss_preset, std::memory_order_relaxed);
     g_dusk_dlss_m.store(state.dusk_dlss_m, std::memory_order_relaxed);
-    g_split_scale.store(state.split_scale, std::memory_order_relaxed);
     g_rescale_pin.store(state.rescale_pin, std::memory_order_relaxed);
     g_pin_main.store(state.pin_main, std::memory_order_relaxed);
     g_pin_strict.store(state.pin_strict, std::memory_order_relaxed);
@@ -258,7 +255,6 @@ inline void StoreLive(const LiveState& state) {
         .dlss_auto_exposure = g_dlss_auto_exposure.load(std::memory_order_relaxed),
         .dlss_preset = g_dlss_preset.load(std::memory_order_relaxed),
         .dusk_dlss_m = g_dusk_dlss_m.load(std::memory_order_relaxed),
-        .split_scale = g_split_scale.load(std::memory_order_relaxed),
         .rescale_pin = g_rescale_pin.load(std::memory_order_relaxed),
         .pin_main = g_pin_main.load(std::memory_order_relaxed),
         .pin_strict = g_pin_strict.load(std::memory_order_relaxed),
@@ -315,12 +311,12 @@ inline bool ApplyLive(std::uint64_t frame) {
              "Nx2Perf live change #{} at frame {}: verify={} dusk_off={:#x} uboreuse={} "
              "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} "
              "dlss_tight={} dlss_hdr={} dlss_auto_exposure={} dlss_preset={} dusk_dlss_m={} "
-             "split_scale={} rescale_pin={} pin_main={} pin_strict={} pin_blit={} "
+             "rescale_pin={} pin_main={} pin_strict={} pin_blit={} "
              "main_partner={} pass_timing={} sysmix_ahead={} sites: {}",
              requested, frame, state.verify ? 1 : 0, state.dusk_off, state.uboreuse,
              state.frames_ahead, state.fence_batch, state.sync_submit, state.alias,
              state.alias_sync, state.dlss_tight, state.dlss_hdr, state.dlss_auto_exposure,
-             state.dlss_preset, state.dusk_dlss_m, state.split_scale, state.rescale_pin,
+             state.dlss_preset, state.dusk_dlss_m, state.rescale_pin,
              state.pin_main, state.pin_strict, state.pin_blit, state.main_partner,
              state.pass_timing, state.sysmix_ahead, SitesText(state.Effective()));
     return true;
@@ -351,9 +347,6 @@ inline void ReadSwitch() {
     }
     if (const char* value = std::getenv("EDEN_NX2_ALIAS_SYNC_ALWAYS"); value && *value) {
         state.alias_sync = value[0] == '1' ? 1 : 0;
-    }
-    if (const char* value = std::getenv("EDEN_NX2_DUSK_SPLIT"); value && *value) {
-        state.split_scale = value[0] == '1' ? 1 : 0;
     }
     if (const char* value = std::getenv("EDEN_NX2_DLSS_TIGHT"); value && *value) {
         state.dlss_tight = value[0] == '1' ? 1 : 0;
@@ -491,13 +484,12 @@ enum class RescaleReason : std::uint8_t {
     Blit,          ///< BlitImage
     Join,          ///< an image joined from overlapping ones
     Upscaler,      ///< the temporal upscaler's inputs and output
-    Split,         ///< split scale: the upscaler's inputs to 1x
     Other,
     Count,
 };
 inline constexpr std::array<std::string_view, static_cast<std::size_t>(RescaleReason::Count)>
     RescaleReasonNames{"target", "target_partner", "storage",  "alias", "copy",
-                       "blit",   "join",           "upscaler", "split", "other"};
+                       "blit",   "join",           "upscaler", "other"};
 inline std::array<std::array<std::atomic<std::uint64_t>, RescaleReasonNames.size()>, 2>
     g_rescale_by{};
 
@@ -543,7 +535,7 @@ inline void NoteRescale(bool up, bool flip, RescaleReason reason, std::uint64_t 
 
 /// Render targets that kept a pass with a main frame image at 1x (texture cache thread notes,
 /// FlushRescaleStats logs): which image and why it could not scale ("info": not rescalable by
-/// its own size or layout, "alias": an image aliasing it is not, "split", "pinned"), and the
+/// its own size or layout, "alias": an image aliasing it is not, "pinned"), and the
 /// passes main_partner raised instead.
 struct PartnerBlock {
     std::uint64_t gpu_addr{};

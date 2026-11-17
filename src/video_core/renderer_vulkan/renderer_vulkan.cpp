@@ -275,21 +275,14 @@ void LogPerfSummary(Scheduler& scheduler, const VideoCore::DlssStatus& dlss, u64
                         : fmt::format("pre {:.2f} upscale {:.2f} (max {:.2f}) post {:.2f} over {} frames",
                                       gpu.pre_ms, gpu.upscale_ms, gpu.upscale_max_ms,
                                       gpu.post_ms, gpu.frames);
-    const auto& resolution = Settings::values.resolution_info;
     LOG_INFO(Render_Vulkan,
              "Nx2Summary perf: {:.1f} s, {} frames, frame ms avg {:.2f} p99 {:.2f} max {:.2f}; "
              "sync submit wait {:.2f} ms/frame ({} waits); upscaler {} ({} upscales, {} history "
-             "resets, split scale {}); GPU ms/frame {}; generated frames {:.0f}%; commit left {} "
+             "resets); GPU ms/frame {}; generated frames {:.0f}%; commit left {} "
              "MiB",
              std::chrono::duration<double>(now - start).count(), sorted.size(), sum / frames, p99,
              sorted.back(), static_cast<double>(sync_ns) / 1e6 / frames, sync_waits, upscaler,
-             upscales, resets,
-             VideoCommon::DlssMode::SplitScaleActive(
-                 Settings::GetCurrentProgramID(),
-                 resolution.up_scale > (1U << resolution.down_shift))
-                 ? "on"
-                 : "off",
-             gpu_text,
+             upscales, resets, gpu_text,
              100.0 * static_cast<double>(generated_frames) /
                  (frames + static_cast<double>(generated_frames)),
              Perf::g_commit_left_mib.load(std::memory_order_relaxed));

@@ -70,10 +70,6 @@ public:
     [[nodiscard]] VkSampler PointSampler() const noexcept {
         return *point_sampler;
     }
-    /// Bilinear clamp sampler, for stretching a smaller Output() (split scale).
-    [[nodiscard]] VkSampler LinearSampler() const noexcept {
-        return *linear_sampler;
-    }
 
 private:
     class Pass;

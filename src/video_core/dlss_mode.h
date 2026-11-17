@@ -86,40 +86,6 @@ constexpr Quality EffectiveQuality(u64 program_id, Quality mode) {
                : mode;
 }
 
-/// Split scale (The Duskbloods above 1x): the upscaler's inputs stay at 1x and its output is the
-/// largest DLSS takes from them in a mode that follows a changing render size: just under 2x (the
-/// Performance ratio), at most the scaled target, whatever mode is selected (a higher-quality
-/// mode would only shrink the output of a fixed render). The scaled target itself (3840x2160 from
-/// 1108x624, 3.47x) is past every mode; Ultra Performance is exactly 3x and fits no other render
-/// size. One stretch covers the rest. FSR 3.1 takes the same size.
-constexpr Extent SplitOutput(Extent render, Extent target) {
-    float factor = 1.95f;
-    if (render.width == 0 || render.height == 0) {
-        return target;
-    }
-    const float fit_w = static_cast<float>(target.width) / static_cast<float>(render.width);
-    const float fit_h = static_cast<float>(target.height) / static_cast<float>(render.height);
-    factor = factor < fit_w ? factor : fit_w;
-    factor = factor < fit_h ? factor : fit_h;
-    const auto scale = [factor](u32 size, u32 limit) {
-        const u32 scaled = static_cast<u32>(static_cast<float>(size) * factor + 0.5f);
-        return scaled < limit ? scaled : limit;
-    };
-    const Extent output{scale(render.width, target.width), scale(render.height, target.height)};
-    // Within 1% of the target (a region of the target's aspect): the target itself.
-    return output.width * 100 >= target.width * 99 && output.height * 100 >= target.height * 99
-               ? target
-               : output;
-}
-
-/// The Duskbloods' split scale is on (the "2x+ performance" setting, overridden by perf_flip
-/// split_scale and EDEN_NX2_DUSK_SPLIT) and the resolution scale is above 1x.
-inline bool SplitScaleActive(u64 program_id, bool scaled) {
-    return scaled && program_id == DuskbloodsProgramId &&
-           Nx2Perf::LiveOr(Nx2Perf::g_split_scale,
-                           Settings::values.dusk_split_scale.GetValue());
-}
-
 /// The Duskbloods above 1x runs preset K in every mode: M (the setting's default, and NVIDIA's
 /// own preset for Performance) draws pairs of dark rows every 64 output rows at 2x resolution
 /// scale (3840x2160 output; 5 of 40 frames at Performance) and costs 14.0 ms there against K's

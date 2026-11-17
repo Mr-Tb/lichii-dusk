@@ -1217,30 +1217,6 @@ void MainWindow::InitializeWidgets() {
                     action->setChecked(choice == selected);
                     action->setEnabled(UpscalerAllowed(choice));
                 }
-                if (Settings::GetCurrentProgramID() ==
-                    VideoCommon::DlssMode::DuskbloodsProgramId) {
-                    // Above 1x: the whole frame at the resolution scale, or split scale (the
-                    // scene at 1x, the upscaler's output stretched with sharpening).
-                    const auto& resolution = Settings::values.resolution_info;
-                    const bool scaled = resolution.up_scale > (1U << resolution.down_shift);
-                    const bool split = Settings::values.dusk_split_scale.GetValue();
-                    context_menu.addSeparator();
-                    for (const bool performance : {false, true}) {
-                        QAction* const action = context_menu.addAction(
-                            performance
-                                ? tr("2x+ performance (scene at 1x, upscaled and stretched)")
-                                : tr("2x+ quality (whole frame at the resolution scale)"),
-                            [this, performance] {
-                                Settings::values.dusk_split_scale.SetValue(performance);
-                                // The choice wins over EDEN_NX2_DUSK_SPLIT and perf_flip.
-                                VideoCommon::Nx2Perf::g_split_scale.store(-1);
-                                UpdateUpscalerButton();
-                            });
-                        action->setCheckable(true);
-                        action->setChecked(split == performance);
-                        action->setEnabled(scaled);
-                    }
-                }
                 context_menu.exec(upscaler_status_button->mapToGlobal(menu_location));
                 upscaler_status_button->repaint();
             });
@@ -5753,13 +5729,6 @@ void MainWindow::UpdateUpscalerButton() {
         tooltip += tr("\nThis game renders its own region of about 58% of the output and sizes it "
                       "itself, so DLAA and Ultra Performance cannot fit it and are not offered; "
                       "the DLSS mode picks NVIDIA's tuning for that region.");
-        const auto& resolution = Settings::values.resolution_info;
-        if (selected && resolution.up_scale > (1U << resolution.down_shift) &&
-            VideoCommon::DlssMode::SplitScaleActive(Settings::GetCurrentProgramID(), true)) {
-            text += tr(" (2X PERF)");
-            tooltip += tr("\n2x+ performance: the scene renders at 1x and the upscaler's output is "
-                          "stretched to the resolution scale (right-click for 2x+ quality).");
-        }
     }
     upscaler_status_button->setText(text);
     upscaler_status_button->setToolTip(
