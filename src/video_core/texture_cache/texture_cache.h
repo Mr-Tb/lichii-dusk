@@ -3200,7 +3200,9 @@ void TextureCache<P>::TickAsyncUnswizzle() {
 
 template <class P>
 bool TextureCache<P>::ScaleUp(Image& image, Nx2Perf::RescaleReason reason) {
-    if (PinBlocks(image)) {
+    // Not an alias sync: it runs while a draw is prepared, and a pinned alias left at 1x there
+    // makes CopyImage scale the prepared image down, dropping it from that draw.
+    if (reason != Nx2Perf::RescaleReason::Alias && PinBlocks(image)) {
         return false;
     }
     const bool has_copy = image.HasScaled();
