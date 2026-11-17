@@ -157,6 +157,12 @@ struct LiveState {
     /// An image that keeps bouncing between 1x and the resolution scale stays at 1x
     /// (EDEN_NX2_RESCALE_PIN; default: The Duskbloods only)
     int rescale_pin = -1;
+    /// rescale_pin: the main frame (the upscaler's images and the targets drawn with them) is
+    /// never pinned and wins over pinned partners (EDEN_NX2_PIN_MAIN; default on)
+    int pin_main = -1;
+    /// rescale_pin: a pinned image stays at 1x on every path, not only render targets and the
+    /// upscaler (EDEN_NX2_PIN_STRICT; default on)
+    int pin_strict = -1;
 
     [[nodiscard]] std::uint32_t Effective() const noexcept {
         return named | (verify ? VerifyMask : 0);
@@ -181,6 +187,8 @@ inline std::atomic<int> g_dlss_preset{-1};
 inline std::atomic<int> g_dusk_dlss_m{-1};
 inline std::atomic<int> g_split_scale{-1};
 inline std::atomic<int> g_rescale_pin{-1};
+inline std::atomic<int> g_pin_main{-1};
+inline std::atomic<int> g_pin_strict{-1};
 /// Live changes requested / applied, and the rasterizer frame of the last applied one.
 inline std::atomic<std::uint64_t> g_live_requested{};
 inline std::atomic<std::uint64_t> g_live_applied{};
@@ -210,6 +218,8 @@ inline void StoreLive(const LiveState& state) {
     g_dusk_dlss_m.store(state.dusk_dlss_m, std::memory_order_relaxed);
     g_split_scale.store(state.split_scale, std::memory_order_relaxed);
     g_rescale_pin.store(state.rescale_pin, std::memory_order_relaxed);
+    g_pin_main.store(state.pin_main, std::memory_order_relaxed);
+    g_pin_strict.store(state.pin_strict, std::memory_order_relaxed);
 }
 
 [[nodiscard]] inline LiveState CurrentLive() {
@@ -230,6 +240,8 @@ inline void StoreLive(const LiveState& state) {
         .dusk_dlss_m = g_dusk_dlss_m.load(std::memory_order_relaxed),
         .split_scale = g_split_scale.load(std::memory_order_relaxed),
         .rescale_pin = g_rescale_pin.load(std::memory_order_relaxed),
+        .pin_main = g_pin_main.load(std::memory_order_relaxed),
+        .pin_strict = g_pin_strict.load(std::memory_order_relaxed),
     };
 }
 
@@ -279,12 +291,12 @@ inline bool ApplyLive(std::uint64_t frame) {
              "Nx2Perf live change #{} at frame {}: verify={} dusk_off={:#x} uboreuse={} "
              "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} "
              "dlss_tight={} dlss_hdr={} dlss_auto_exposure={} dlss_preset={} dusk_dlss_m={} "
-             "split_scale={} rescale_pin={} sites: {}",
+             "split_scale={} rescale_pin={} pin_main={} pin_strict={} sites: {}",
              requested, frame, state.verify ? 1 : 0, state.dusk_off, state.uboreuse,
              state.frames_ahead, state.fence_batch, state.sync_submit, state.alias,
              state.alias_sync, state.dlss_tight, state.dlss_hdr, state.dlss_auto_exposure,
              state.dlss_preset, state.dusk_dlss_m, state.split_scale, state.rescale_pin,
-             SitesText(state.Effective()));
+             state.pin_main, state.pin_strict, SitesText(state.Effective()));
     return true;
 }
 
@@ -322,6 +334,12 @@ inline void ReadSwitch() {
     }
     if (const char* value = std::getenv("EDEN_NX2_RESCALE_PIN"); value && *value) {
         state.rescale_pin = value[0] == '1' ? 1 : 0;
+    }
+    if (const char* value = std::getenv("EDEN_NX2_PIN_MAIN"); value && *value) {
+        state.pin_main = value[0] == '1' ? 1 : 0;
+    }
+    if (const char* value = std::getenv("EDEN_NX2_PIN_STRICT"); value && *value) {
+        state.pin_strict = value[0] == '1' ? 1 : 0;
     }
     StoreLive(state);
     LOG_INFO(HW_GPU, "Nx2Perf sites (PERF_VERIFY={}, alias={:#x}, alias_sync={}): {}",

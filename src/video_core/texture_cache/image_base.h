@@ -62,6 +62,9 @@ enum class ImageFlagBits : u32 {
     SparseTiles = 1 << 23,
     /// An input of The Duskbloods' upscaler: it stays at 1x while split scale is on.
     SplitNative = 1 << 24,
+    /// The Duskbloods' main frame (the upscaler's images and the targets drawn with them): never
+    /// pinned; wins over pinned partners.
+    MainFrame = 1 << 25,
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 

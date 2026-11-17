@@ -686,6 +686,12 @@ private:
         return pin_active && image.native_pin == pin_generation;
     }
     void MaybePin(Image& image);
+    /// pin_main: unpins a main frame image and marks it MainFrame.
+    void ReleasePin(Image& image);
+    /// pin_strict: a pinned image stays at 1x on every path.
+    [[nodiscard]] bool PinBlocks(const ImageBase& image) const noexcept {
+        return pin_strict && Pinned(image);
+    }
     /// The upscaler's colour, depth and motion inputs at the last upscale, for their age.
     struct UpscaleSeen {
         ImageId id{};
@@ -764,6 +770,9 @@ private:
     /// which lets every pinned image scale again).
     bool pin_active = false;
     bool pin_split = false;
+    bool pin_main = false, pin_strict = false;
+    /// frame_tick of the last upscale with a depth target: pins are taken only in gameplay.
+    u64 last_upscale_tick = 0;
     u32 pin_generation = 1;
     u64 total_used_memory = 0;
     u64 minimum_memory;
