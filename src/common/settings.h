@@ -447,6 +447,10 @@ struct Values {
                                                            true,
                                                            true};
     SwitchableSetting<bool> ocarina_fsr{linkage, false, "ocarina_fsr", Category::Renderer};
+    // The Duskbloods above 1x: "performance" (split scale: the scene at 1x, the upscaler's output
+    // stretched to the resolution scale) rather than "quality" (the whole frame scaled).
+    SwitchableSetting<bool> dusk_split_scale{linkage, false, "dusk_split_scale",
+                                             Category::Renderer};
     // AMD FSR 4 in place of FSR 3.1 where FSR replaces a game's upscaler (Windows, AMD's driver).
     SwitchableSetting<bool> amd_fsr4{linkage, false, "amd_fsr4", Category::Renderer};
     SwitchableSetting<AspectRatio, true> aspect_ratio{linkage,

@@ -112,11 +112,12 @@ constexpr Extent SplitOutput(Extent render, Extent target) {
                : output;
 }
 
-/// The Duskbloods' split scale is on (perf_flip split_scale, EDEN_NX2_DUSK_SPLIT=1) and the
-/// resolution scale is above 1x.
+/// The Duskbloods' split scale is on (the "2x+ performance" setting, overridden by perf_flip
+/// split_scale and EDEN_NX2_DUSK_SPLIT) and the resolution scale is above 1x.
 inline bool SplitScaleActive(u64 program_id, bool scaled) {
     return scaled && program_id == DuskbloodsProgramId &&
-           Nx2Perf::LiveOr(Nx2Perf::g_split_scale, false);
+           Nx2Perf::LiveOr(Nx2Perf::g_split_scale,
+                           Settings::values.dusk_split_scale.GetValue());
 }
 
 /// The Duskbloods above 1x runs preset K in every mode: M (the setting's default, and NVIDIA's

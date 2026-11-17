@@ -36,6 +36,7 @@
 #include "video_core/host_shaders/convert_non_msaa_to_msaa_depth_stencil_frag_spv.h"
 #include "video_core/host_shaders/convert_s8d24_to_abgr8_frag_spv.h"
 #include "video_core/host_shaders/full_screen_triangle_vert_spv.h"
+#include "video_core/host_shaders/split_stretch_sharpen_frag_spv.h"
 #include "video_core/host_shaders/temporal_sharpen_frag_spv.h"
 #include "video_core/host_shaders/temporal_upscale_frag_spv.h"
 #include "video_core/host_shaders/vulkan_blit_depth_stencil_frag_spv.h"
@@ -709,6 +710,7 @@ BlitImageHelper::BlitImageHelper(const Device& device_, Scheduler& scheduler_,
       blit_color_to_color_frag(BuildShader(device, BLIT_COLOR_FLOAT_FRAG_SPV)),
       temporal_upscale_frag(BuildShader(device, TEMPORAL_UPSCALE_FRAG_SPV)),
       temporal_sharpen_frag(BuildShader(device, TEMPORAL_SHARPEN_FRAG_SPV)),
+      split_sharpen_frag(BuildShader(device, SPLIT_STRETCH_SHARPEN_FRAG_SPV)),
       blit_color_srgb_to_linear_frag(BuildShader(device, BLIT_COLOR_SRGB_TO_LINEAR_FRAG_SPV)),
       blit_color_msaa_frag(BuildShader(device, BLIT_COLOR_MSAA_FRAG_SPV)),
       blit_depth_stencil_frag(device.IsExtShaderStencilExportSupported()
@@ -881,6 +883,56 @@ void BlitImageHelper::TemporalSharpen(const Framebuffer* dst_framebuffer, VkImag
                              push_constants);
         cmdbuf.Draw(3, 1, 0, 0);
     });
+    scheduler.InvalidateState();
+}
+
+void BlitImageHelper::StretchSharpen(const Framebuffer* dst_framebuffer, VkImageView src_image_view,
+                                     VkImage src_image, const Region2D& dst_region,
+                                     const Region2D& src_region, const Extent3D& src_size,
+                                     f32 sharpness) {
+    const VkPipelineLayout layout = *temporal_sharpen_pipeline_layout;
+    const VkPipeline pipeline =
+        FindOrEmplaceTemporalSharpenPipeline(dst_framebuffer->RenderPass(), true);
+    TemporalSharpenPushConstants push_constants{
+        .vertex =
+            {
+                .tex_scale = {static_cast<float>(src_region.end.x - src_region.start.x) /
+                                  static_cast<float>(src_size.width),
+                              static_cast<float>(src_region.end.y - src_region.start.y) /
+                                  static_cast<float>(src_size.height)},
+                .tex_offset = {static_cast<float>(src_region.start.x) /
+                                   static_cast<float>(src_size.width),
+                               static_cast<float>(src_region.start.y) /
+                                   static_cast<float>(src_size.height)},
+            },
+        .rcas = {},
+    };
+    FSR::FsrRcasCon(push_constants.rcas.data(), sharpness);
+    // Read the framebuffer now: the texture cache's framebuffer slots can move before the
+    // worker records this.
+    const VkRenderPass render_pass = dst_framebuffer->RenderPass();
+    const VkFramebuffer framebuffer = dst_framebuffer->Handle();
+    const VkExtent2D render_area = dst_framebuffer->RenderArea();
+    const VkSampler sampler = *linear_sampler;
+    scheduler.RequestOutsideRenderPassOperationContext();
+    scheduler.Record([this, render_pass, framebuffer, render_area, src_image_view, src_image,
+                      sampler, dst_region, pipeline, layout,
+                      push_constants](vk::CommandBuffer cmdbuf) {
+        TransitionImageLayout(cmdbuf, src_image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        BeginRenderPass(cmdbuf, render_pass, framebuffer, render_area);
+        const VkDescriptorSet descriptor_set = one_texture_descriptor_allocator.Commit();
+        UpdateOneTextureDescriptorSet(device, descriptor_set, sampler, src_image_view,
+                                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        cmdbuf.BindPipeline(VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
+        cmdbuf.BindDescriptorSets(VK_PIPELINE_BIND_POINT_GRAPHICS, layout, 0, descriptor_set,
+                                  nullptr);
+        BindBlitState(cmdbuf, dst_region);
+        cmdbuf.PushConstants(layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                             push_constants);
+        cmdbuf.Draw(3, 1, 0, 0);
+        cmdbuf.EndRenderPass();
+    });
+    // The pass replaced the bound pipeline and its static state, the color write mask among it.
     scheduler.InvalidateState();
 }
 
@@ -1537,13 +1589,17 @@ VkPipeline BlitImageHelper::FindOrEmplaceTemporalUpscalePipeline(VkRenderPass re
     return *temporal_upscale_pipelines.back();
 }
 
-VkPipeline BlitImageHelper::FindOrEmplaceTemporalSharpenPipeline(VkRenderPass renderpass) {
-    const auto it = std::ranges::find(temporal_sharpen_keys, renderpass);
-    if (it != temporal_sharpen_keys.end()) {
-        return *temporal_sharpen_pipelines[std::distance(temporal_sharpen_keys.begin(), it)];
+VkPipeline BlitImageHelper::FindOrEmplaceTemporalSharpenPipeline(VkRenderPass renderpass,
+                                                                  bool stretch) {
+    auto& keys = stretch ? split_sharpen_keys : temporal_sharpen_keys;
+    auto& pipelines = stretch ? split_sharpen_pipelines : temporal_sharpen_pipelines;
+    const auto it = std::ranges::find(keys, renderpass);
+    if (it != keys.end()) {
+        return *pipelines[std::distance(keys.begin(), it)];
     }
-    temporal_sharpen_keys.push_back(renderpass);
-    const std::array stages = MakeStages(*full_screen_vert, *temporal_sharpen_frag);
+    keys.push_back(renderpass);
+    const std::array stages =
+        MakeStages(*full_screen_vert, stretch ? *split_sharpen_frag : *temporal_sharpen_frag);
     const VkPipelineColorBlendAttachmentState blend_attachment{
         .blendEnable = VK_FALSE,
         .srcColorBlendFactor = VK_BLEND_FACTOR_ZERO,
@@ -1566,7 +1622,7 @@ VkPipeline BlitImageHelper::FindOrEmplaceTemporalSharpenPipeline(VkRenderPass re
         .blendConstants = {0.0f, 0.0f, 0.0f, 0.0f},
     };
     const VkPipelineInputAssemblyStateCreateInfo input_assembly_ci = GetPipelineInputAssemblyStateCreateInfo(device);
-    temporal_sharpen_pipelines.push_back(device.GetLogical().CreateGraphicsPipeline({
+    pipelines.push_back(device.GetLogical().CreateGraphicsPipeline({
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
         .pNext = nullptr,
         .flags = 0,
@@ -1587,7 +1643,7 @@ VkPipeline BlitImageHelper::FindOrEmplaceTemporalSharpenPipeline(VkRenderPass re
         .basePipelineHandle = VK_NULL_HANDLE,
         .basePipelineIndex = 0,
     }, device.StaticPipelineCache()));
-    return *temporal_sharpen_pipelines.back();
+    return *pipelines.back();
 }
 
 VkPipeline BlitImageHelper::FindOrEmplaceDepthStencilPipeline(const BlitImagePipelineKey& key) {

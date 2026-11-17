@@ -1951,7 +1951,7 @@ bool TextureCacheRuntime::UpscaleWithFsr3(Framebuffer* dst_framebuffer, ImageVie
     const bool stretched = extent.width != target.width || extent.height != target.height;
     DrawUpscaledOutput(dst_framebuffer, fsr3_upscaler->OutputView(), fsr3_upscaler->OutputImage(),
                        stretched ? fsr3_upscaler->LinearSampler() : fsr3_upscaler->PointSampler(),
-                       extent);
+                       extent, !sharpen);
     VideoCommon::Nx2Perf::g_upscaler.store(1, std::memory_order_relaxed);
     static bool logged{};
     if (!logged) {
@@ -1984,7 +1984,7 @@ VkExtent2D TextureCacheRuntime::SplitExtent(std::array<u32, 2> render_size, VkEx
 
 void TextureCacheRuntime::DrawUpscaledOutput(Framebuffer* dst_framebuffer, VkImageView view,
                                              VkImage output, VkSampler sampler,
-                                             VkExtent2D source_size) {
+                                             VkExtent2D source_size, bool sharpen_stretch) {
     // Draw the result into the DLSS output, which keeps its own format; the blit leaves the
     // upscaler's output image in SHADER_READ_ONLY_OPTIMAL, so return it to GENERAL for the next
     // frame. A smaller result (split scale) is stretched over it with the sampler.
@@ -1997,8 +1997,24 @@ void TextureCacheRuntime::DrawUpscaledOutput(Framebuffer* dst_framebuffer, VkIma
         .start = {0, 0},
         .end = {static_cast<s32>(source_size.width), static_cast<s32>(source_size.height)},
     };
-    blit_image_helper.BlitColor(dst_framebuffer, view, output, sampler, region, source,
-                                {source_size.width, source_size.height, 1});
+    // EDEN_NX2_SPLIT_SHARPEN=<stops>|off: RCAS strength on the stretch (0 is the strongest).
+    static const std::optional<f32> split_sharpen = []() -> std::optional<f32> {
+        const char* const value = std::getenv("EDEN_NX2_SPLIT_SHARPEN");
+        if (value && std::string_view{value} == "off") {
+            return std::nullopt;
+        }
+        return value ? static_cast<f32>(std::strtod(value, nullptr)) : 0.5f;
+    }();
+    const bool stretched =
+        source_size.width != extent.width || source_size.height != extent.height;
+    if (stretched && sharpen_stretch && split_sharpen) {
+        blit_image_helper.StretchSharpen(dst_framebuffer, view, output, region, source,
+                                         {source_size.width, source_size.height, 1},
+                                         *split_sharpen);
+    } else {
+        blit_image_helper.BlitColor(dst_framebuffer, view, output, sampler, region, source,
+                                    {source_size.width, source_size.height, 1});
+    }
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([output](vk::CommandBuffer cmdbuf) {
         const VkImageMemoryBarrier barrier{
@@ -2123,7 +2139,7 @@ bool TextureCacheRuntime::UpscaleWithDlss(Framebuffer* dst_framebuffer, ImageVie
     const bool stretched = extent.width != target.width || extent.height != target.height;
     DrawUpscaledOutput(dst_framebuffer, dlss_upscaler->OutputView(), dlss_upscaler->OutputImage(),
                        stretched ? dlss_upscaler->LinearSampler() : dlss_upscaler->PointSampler(),
-                       extent);
+                       extent, true);
     static bool logged{};
     if (!logged) {
         logged = true;

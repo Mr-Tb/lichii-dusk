@@ -97,6 +97,13 @@ public:
     void TemporalSharpen(const Framebuffer* dst_framebuffer, VkImageView source,
                          const Region2D& dst_region, f32 sharpness);
 
+    /// Split scale: src_region of a linear HDR source (src_size, in the GENERAL layout) stretched
+    /// over dst_region with RCAS in the same pass (split_stretch_sharpen.frag), as BlitColor does
+    /// without it.
+    void StretchSharpen(const Framebuffer* dst_framebuffer, VkImageView src_image_view,
+                        VkImage src_image, const Region2D& dst_region, const Region2D& src_region,
+                        const Extent3D& src_size, f32 sharpness);
+
     void BlitColorMSAA(const Framebuffer* dst_framebuffer, const ImageView& src_image_view,
                        const Region2D& dst_region, const Region2D& src_region);
 
@@ -190,7 +197,8 @@ private:
     [[nodiscard]] VkPipeline FindOrEmplaceColorPipeline(const BlitImagePipelineKey& key);
 
     [[nodiscard]] VkPipeline FindOrEmplaceTemporalUpscalePipeline(VkRenderPass renderpass);
-    [[nodiscard]] VkPipeline FindOrEmplaceTemporalSharpenPipeline(VkRenderPass renderpass);
+    [[nodiscard]] VkPipeline FindOrEmplaceTemporalSharpenPipeline(VkRenderPass renderpass,
+                                                                  bool stretch = false);
 
     [[nodiscard]] VkPipeline FindOrEmplaceDepthStencilPipeline(const BlitImagePipelineKey& key);
 
@@ -244,6 +252,7 @@ private:
     vk::ShaderModule blit_color_to_color_frag;
     vk::ShaderModule temporal_upscale_frag;
     vk::ShaderModule temporal_sharpen_frag;
+    vk::ShaderModule split_sharpen_frag;
     vk::ShaderModule blit_color_srgb_to_linear_frag;
     vk::ShaderModule blit_color_msaa_frag;
     vk::ShaderModule blit_depth_stencil_frag;
@@ -281,6 +290,8 @@ private:
     std::vector<vk::Pipeline> temporal_upscale_pipelines;
     std::vector<VkRenderPass> temporal_sharpen_keys;
     std::vector<vk::Pipeline> temporal_sharpen_pipelines;
+    std::vector<VkRenderPass> split_sharpen_keys;
+    std::vector<vk::Pipeline> split_sharpen_pipelines;
     std::vector<BlitImagePipelineKey> blit_depth_stencil_keys;
     std::vector<vk::Pipeline> blit_depth_stencil_pipelines;
     std::vector<BlitImagePipelineKey> clear_color_keys;
