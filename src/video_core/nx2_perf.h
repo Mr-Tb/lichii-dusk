@@ -535,7 +535,7 @@ inline void NoteRescale(bool up, bool flip, RescaleReason reason, std::uint64_t 
 
 /// Render targets that kept a pass with a main frame image at 1x (texture cache thread notes,
 /// FlushRescaleStats logs): which image and why it could not scale ("info": not rescalable by
-/// its own size or layout, "alias": an image aliasing it is not, "pinned"), and the
+/// its own size or layout, "alias": an image aliasing it is not, "shadow", "pinned"), and the
 /// passes main_partner raised instead.
 struct PartnerBlock {
     std::uint64_t gpu_addr{};

@@ -126,6 +126,13 @@ public:
             PassNoteDispatch(hash);
         }
     }
+    /// PassRescale: recording thread, a resolution-scale copy of an image starts (true) or ends.
+    void PassRescale(bool begin) {
+        if (pass_sampling) [[unlikely]] {
+            PassMark({.kind = begin ? PassKind::Rescale : PassKind::Other});
+            pass_framebuffer = nullptr;
+        }
+    }
     void TraceGraphicsPipeline(const std::array<u64, 6>& hashes);
     void TraceComputePipeline(u64 hash);
     /// Worker thread, inside a recorded command: timestamps one draw or dispatch of a sampled
@@ -595,7 +602,9 @@ private:
     GpuSplit split_totals;
 
     // Per-pass timing (recording thread only; the query results are read there too).
-    enum class PassKind : u8 { Pass, Compute, Upscaler, Other };
+    /// Submit: from the end of one command buffer to the start of the next (the GPU idle, waiting
+    /// for work, plus the next submission's staging uploads).
+    enum class PassKind : u8 { Pass, Compute, Upscaler, Rescale, Submit, Other };
     struct PassSegment {
         PassLabel label{};
         u64 shader{};

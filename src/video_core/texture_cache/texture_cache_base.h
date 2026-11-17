@@ -670,6 +670,16 @@ private:
 
     bool ImageCanRescale(ImageBase& image);
     bool ImageCanRescaleUnpinned(ImageBase& image);
+    /// The Duskbloods' shadow maps (square depth targets, 1024 and up) stay at 1x: scaled they
+    /// cost up to 4.6 ms a frame on an RTX 3060 and four times the memory (8192x8192 at 2x) for
+    /// sharper shadow edges only.
+    [[nodiscard]] static bool DuskShadowMap(const ImageBase& image) {
+        const auto& info = image.info;
+        return VideoCore::Surface::GetFormatType(info.format) !=
+                   VideoCore::Surface::SurfaceType::ColorTexture &&
+               info.size.width == info.size.height && info.size.width >= 1024 &&
+               Settings::GetCurrentProgramID() == DlssMode::DuskbloodsProgramId;
+    }
     void InvalidateScale(Image& image);
     void NoteRescale(Image& image, bool up, Nx2Perf::RescaleReason reason);
     bool ScaleUp(Image& image, Nx2Perf::RescaleReason reason = Nx2Perf::RescaleReason::Other);

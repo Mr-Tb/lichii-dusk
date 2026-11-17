@@ -4269,13 +4269,17 @@ bool Image::ScaleUp(bool ignore) {
     if (aspect_mask == 0) {
         aspect_mask = ImageAspectMask(info.format);
     }
+    scheduler->PassRescale(true);
+    bool blitted = true;
     if (NeedsScaleHelper()) {
-        if (!BlitScaleHelper(true)) {
-            current_image = &Image::original_image;
-            return false;
-        }
+        blitted = BlitScaleHelper(true);
     } else {
         BlitScale(*scheduler, *original_image, *scaled_image, info, aspect_mask, resolution);
+    }
+    scheduler->PassRescale(false);
+    if (!blitted) {
+        current_image = &Image::original_image;
+        return false;
     }
     return true;
 }
@@ -4297,14 +4301,18 @@ bool Image::ScaleDown(bool ignore) {
     if (aspect_mask == 0) {
         aspect_mask = ImageAspectMask(info.format);
     }
+    scheduler->PassRescale(true);
+    bool blitted = true;
     if (NeedsScaleHelper()) {
-        if (!BlitScaleHelper(false)) {
-            current_image = &Image::scaled_image;
-            flags |= ImageFlagBits::Rescaled;
-            return false;
-        }
+        blitted = BlitScaleHelper(false);
     } else {
         BlitScale(*scheduler, *scaled_image, *original_image, info, aspect_mask, resolution, false);
+    }
+    scheduler->PassRescale(false);
+    if (!blitted) {
+        current_image = &Image::scaled_image;
+        flags |= ImageFlagBits::Rescaled;
+        return false;
     }
     return true;
 }

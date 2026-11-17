@@ -1055,6 +1055,15 @@ bool TextureCache<P>::RescaleRenderTargets() {
     bool rescaled = false;
     std::array<ImageId, NUM_RT> tmp_color_images{};
     ImageId tmp_depth_image{};
+    // The Duskbloods: a colour-only clear leaves a scaled depth target out of the vote. It clears
+    // 96x56 tile targets (too small to scale) with its main depth still bound, which took that
+    // depth to 1x and back every frame: two full-size depth copies, and a 2x depth rebuilt from
+    // 1x. Only a scaled depth is left out, so the framebuffer never exceeds an attachment.
+    const bool colour_only_clear =
+        clearing_render_targets && !maxwell3d->regs.clear_surface.Z &&
+        !maxwell3d->regs.clear_surface.S &&
+        Settings::GetCurrentProgramID() == DlssMode::DuskbloodsProgramId;
+    bool depth_left_out = false;
     do {
         flags[Dirty::RenderTargets] = false;
 
@@ -1095,7 +1104,16 @@ bool TextureCache<P>::RescaleRenderTargets() {
             flags[Dirty::ZetaBuffer] = false;
             BindRenderTarget(&render_targets.depth_buffer_id, FindDepthBuffer());
         }
-        check_rescale(render_targets.depth_buffer_id, tmp_depth_image);
+        const ImageViewId depth_view = render_targets.depth_buffer_id;
+        depth_left_out = colour_only_clear && depth_view != NULL_IMAGE_VIEW_ID &&
+                         depth_view != ImageViewId{} &&
+                         True(slot_images[slot_image_views[depth_view].image_id].flags &
+                              ImageFlagBits::Rescaled);
+        if (depth_left_out) {
+            tmp_depth_image = CORRUPT_ID;
+        } else {
+            check_rescale(depth_view, tmp_depth_image);
+        }
         if (pin_active && pin_main) {
             // pin_main: a pass drawing a main frame image and a pinned one releases the pinned
             // ones, so a pin never drags the main frame to 1x.
@@ -1148,6 +1166,10 @@ bool TextureCache<P>::RescaleRenderTargets() {
             scale_rating = 1;
         }
     } while (has_deleted_images);
+    if (depth_left_out) {
+        // The next draw looks the targets up again and scales its depth as usual.
+        flags[Dirty::RenderTargets] = true;
+    }
     const auto set_rating = [this, scale_rating](ImageId image_id) {
         if (image_id != CORRUPT_ID) {
             Image& image = slot_images[image_id];
@@ -2887,7 +2909,7 @@ bool TextureCache<P>::ImageCanRescale(ImageBase& image) {
 
 template <class P>
 bool TextureCache<P>::ImageCanRescaleUnpinned(ImageBase& image) {
-    if (!image.info.rescaleable) {
+    if (!image.info.rescaleable || DuskShadowMap(image)) {
         return false;
     }
     if (Settings::values.resolution_info.downscale && !image.info.downscaleable) {
@@ -3180,7 +3202,7 @@ template <class P>
 bool TextureCache<P>::ScaleUp(Image& image, Nx2Perf::RescaleReason reason) {
     // Not an alias sync: it runs while a draw is prepared, and a pinned alias left at 1x there
     // makes CopyImage scale the prepared image down, dropping it from that draw.
-    if (reason != Nx2Perf::RescaleReason::Alias && PinBlocks(image)) {
+    if ((reason != Nx2Perf::RescaleReason::Alias && PinBlocks(image)) || DuskShadowMap(image)) {
         return false;
     }
     const bool has_copy = image.HasScaled();
@@ -3285,6 +3307,8 @@ bool TextureCache<P>::RaiseMainPartners(std::span<const ImageId> ids) {
             why = "pinned";
         } else if (!image.info.rescaleable) {
             why = "info";
+        } else if (DuskShadowMap(image)) {
+            why = "shadow";
         } else if (Settings::values.resolution_info.downscale) {
             why = "downscale";
         }

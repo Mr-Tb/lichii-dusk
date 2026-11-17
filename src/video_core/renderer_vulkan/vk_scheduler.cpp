@@ -596,6 +596,12 @@ void Scheduler::ReadPassSample() {
         case PassKind::Upscaler:
             what = "upscaler";
             break;
+        case PassKind::Rescale:
+            what = fmt::format("rescale copies {}", group.runs);
+            break;
+        case PassKind::Submit:
+            what = fmt::format("between submits (GPU idle + uploads) {}", group.runs);
+            break;
         case PassKind::Other:
             what = fmt::format("copies/clears/blits in {}", group.runs);
             break;
@@ -1196,6 +1202,10 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     }
     EndPendingOperations();
     InvalidateState();
+    if (pass_sampling) [[unlikely]] {
+        PassMark({.kind = PassKind::Submit});
+        pass_framebuffer = nullptr;
+    }
 
     const u64 signal_value = master_semaphore->NextTick();
     RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value,
@@ -1265,6 +1275,10 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     });
     chunk->MarkSubmit();
     DispatchWork();
+    if (pass_sampling) [[unlikely]] {
+        // The next command buffer's first timestamp closes the gap.
+        PassMark({.kind = PassKind::Other});
+    }
     return signal_value;
 }
 
