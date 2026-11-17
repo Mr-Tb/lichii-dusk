@@ -163,6 +163,18 @@ struct LiveState {
     /// rescale_pin: a pinned image stays at 1x on every path, not only render targets and the
     /// upscaler (EDEN_NX2_PIN_STRICT; default on)
     int pin_strict = -1;
+    /// rescale_pin: a blit from a main frame image leaves a pinned destination at 1x (only a
+    /// main frame destination releases the pins) (EDEN_NX2_PIN_BLIT; default on)
+    int pin_blit = -1;
+    /// A pass that would drag a main frame image to 1x raises partners held back only by their
+    /// aliases instead (EDEN_NX2_MAIN_PARTNER; default on)
+    int main_partner = -1;
+    /// Per-pass GPU timing of one frame every 2 s (EDEN_NX2_PASS_TIMING; default The Duskbloods)
+    int pass_timing = -1;
+    /// sysmix output queues up to 8 more blocks on the host, taken ahead from the guest ring, so
+    /// a late guest mixer does not run the host dry (EDEN_NX2_SYSMIX_AHEAD; default The
+    /// Duskbloods)
+    int sysmix_ahead = -1;
 
     [[nodiscard]] std::uint32_t Effective() const noexcept {
         return named | (verify ? VerifyMask : 0);
@@ -189,6 +201,10 @@ inline std::atomic<int> g_split_scale{-1};
 inline std::atomic<int> g_rescale_pin{-1};
 inline std::atomic<int> g_pin_main{-1};
 inline std::atomic<int> g_pin_strict{-1};
+inline std::atomic<int> g_pin_blit{-1};
+inline std::atomic<int> g_main_partner{-1};
+inline std::atomic<int> g_pass_timing{-1};
+inline std::atomic<int> g_sysmix_ahead{-1};
 /// Live changes requested / applied, and the rasterizer frame of the last applied one.
 inline std::atomic<std::uint64_t> g_live_requested{};
 inline std::atomic<std::uint64_t> g_live_applied{};
@@ -220,6 +236,10 @@ inline void StoreLive(const LiveState& state) {
     g_rescale_pin.store(state.rescale_pin, std::memory_order_relaxed);
     g_pin_main.store(state.pin_main, std::memory_order_relaxed);
     g_pin_strict.store(state.pin_strict, std::memory_order_relaxed);
+    g_pin_blit.store(state.pin_blit, std::memory_order_relaxed);
+    g_main_partner.store(state.main_partner, std::memory_order_relaxed);
+    g_pass_timing.store(state.pass_timing, std::memory_order_relaxed);
+    g_sysmix_ahead.store(state.sysmix_ahead, std::memory_order_relaxed);
 }
 
 [[nodiscard]] inline LiveState CurrentLive() {
@@ -242,6 +262,10 @@ inline void StoreLive(const LiveState& state) {
         .rescale_pin = g_rescale_pin.load(std::memory_order_relaxed),
         .pin_main = g_pin_main.load(std::memory_order_relaxed),
         .pin_strict = g_pin_strict.load(std::memory_order_relaxed),
+        .pin_blit = g_pin_blit.load(std::memory_order_relaxed),
+        .main_partner = g_main_partner.load(std::memory_order_relaxed),
+        .pass_timing = g_pass_timing.load(std::memory_order_relaxed),
+        .sysmix_ahead = g_sysmix_ahead.load(std::memory_order_relaxed),
     };
 }
 
@@ -291,12 +315,14 @@ inline bool ApplyLive(std::uint64_t frame) {
              "Nx2Perf live change #{} at frame {}: verify={} dusk_off={:#x} uboreuse={} "
              "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} "
              "dlss_tight={} dlss_hdr={} dlss_auto_exposure={} dlss_preset={} dusk_dlss_m={} "
-             "split_scale={} rescale_pin={} pin_main={} pin_strict={} sites: {}",
+             "split_scale={} rescale_pin={} pin_main={} pin_strict={} pin_blit={} "
+             "main_partner={} pass_timing={} sysmix_ahead={} sites: {}",
              requested, frame, state.verify ? 1 : 0, state.dusk_off, state.uboreuse,
              state.frames_ahead, state.fence_batch, state.sync_submit, state.alias,
              state.alias_sync, state.dlss_tight, state.dlss_hdr, state.dlss_auto_exposure,
              state.dlss_preset, state.dusk_dlss_m, state.split_scale, state.rescale_pin,
-             state.pin_main, state.pin_strict, SitesText(state.Effective()));
+             state.pin_main, state.pin_strict, state.pin_blit, state.main_partner,
+             state.pass_timing, state.sysmix_ahead, SitesText(state.Effective()));
     return true;
 }
 
@@ -340,6 +366,14 @@ inline void ReadSwitch() {
     }
     if (const char* value = std::getenv("EDEN_NX2_PIN_STRICT"); value && *value) {
         state.pin_strict = value[0] == '1' ? 1 : 0;
+    }
+    for (const auto& [name, field] : {std::pair{"EDEN_NX2_PIN_BLIT", &state.pin_blit},
+                                      std::pair{"EDEN_NX2_MAIN_PARTNER", &state.main_partner},
+                                      std::pair{"EDEN_NX2_PASS_TIMING", &state.pass_timing},
+                                      std::pair{"EDEN_NX2_SYSMIX_AHEAD", &state.sysmix_ahead}}) {
+        if (const char* value = std::getenv(name); value && *value) {
+            *field = value[0] == '1' ? 1 : 0;
+        }
     }
     StoreLive(state);
     LOG_INFO(HW_GPU, "Nx2Perf sites (PERF_VERIFY={}, alias={:#x}, alias_sync={}): {}",
@@ -507,6 +541,41 @@ inline void NoteRescale(bool up, bool flip, RescaleReason reason, std::uint64_t 
     (up ? it->last_up : it->last_down) = reason;
 }
 
+/// Render targets that kept a pass with a main frame image at 1x (texture cache thread notes,
+/// FlushRescaleStats logs): which image and why it could not scale ("info": not rescalable by
+/// its own size or layout, "alias": an image aliasing it is not, "split", "pinned"), and the
+/// passes main_partner raised instead.
+struct PartnerBlock {
+    std::uint64_t gpu_addr{};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    std::string format;
+    std::string_view why;
+    std::uint32_t count{};
+};
+inline std::mutex g_partner_blocks_mutex;
+inline std::vector<PartnerBlock> g_partner_blocks;
+inline std::atomic<std::uint64_t> g_main_raised{};
+
+template <typename Format>
+inline void NotePartnerBlock(std::uint64_t gpu_addr, std::uint32_t width, std::uint32_t height,
+                             std::string_view why, Format&& format) {
+    std::scoped_lock lock{g_partner_blocks_mutex};
+    auto it = std::find_if(g_partner_blocks.begin(), g_partner_blocks.end(),
+                           [&](const PartnerBlock& b) {
+                               return b.gpu_addr == gpu_addr && b.width == width &&
+                                      b.height == height && b.why == why;
+                           });
+    if (it == g_partner_blocks.end()) {
+        if (g_partner_blocks.size() >= 16) {
+            return;
+        }
+        it = g_partner_blocks.insert(g_partner_blocks.end(),
+                                     PartnerBlock{gpu_addr, width, height, format(), why});
+    }
+    ++it->count;
+}
+
 [[nodiscard]] inline std::string RescaleReasonsText(int direction) {
     std::string text;
     for (std::size_t i = 0; i < RescaleReasonNames.size(); ++i) {
@@ -543,7 +612,13 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
         std::scoped_lock lock{g_flip_images_mutex};
         images.swap(g_flip_images);
     }
-    if (up + down + mismatches + pins + tried != 0) {
+    std::vector<PartnerBlock> blocks;
+    {
+        std::scoped_lock lock{g_partner_blocks_mutex};
+        blocks.swap(g_partner_blocks);
+    }
+    const std::uint64_t main_raised = g_main_raised.exchange(0, std::memory_order_relaxed);
+    if (up + down + mismatches + pins + tried + blocks.size() != 0) {
         std::sort(images.begin(), images.end(),
                   [](const FlipImage& a, const FlipImage& b) { return a.flips > b.flips; });
         std::string top;
@@ -555,12 +630,19 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
                                RescaleReasonNames[static_cast<std::size_t>(image.last_up)],
                                RescaleReasonNames[static_cast<std::size_t>(image.last_down)]);
         }
+        std::string blockers;
+        for (const PartnerBlock& block : blocks) {
+            blockers += fmt::format("{}{:x} {}x{} {} {} x{}", blockers.empty() ? "" : "; ",
+                                    block.gpu_addr, block.width, block.height, block.format,
+                                    block.why, block.count);
+        }
         LOG_INFO(HW_GPU,
                  "Rescale (last second): up={} down={} flips={} mismatched_copies={} pinned={} "
                  "up_by={} down_by={} top_flips=[{}] upscales_2x={}/{} released={} main_down={} "
-                 "pins_set_gen={}",
+                 "pins_set_gen={} main_blockers=[{}] main_raised={}",
                  up, down, flips, mismatches, pins, up_by, down_by, top, upscales_2x, tried,
-                 releases, main_down, g_rescale_pins_total.load(std::memory_order_relaxed));
+                 releases, main_down, g_rescale_pins_total.load(std::memory_order_relaxed),
+                 blockers, main_raised);
     }
 }
 

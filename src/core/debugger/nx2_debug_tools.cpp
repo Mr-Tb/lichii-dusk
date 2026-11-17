@@ -633,6 +633,10 @@ json LiveJson(const Perf::LiveState& live) {
         {"rescale_pin", control(live.rescale_pin)},
         {"pin_main", control(live.pin_main)},
         {"pin_strict", control(live.pin_strict)},
+        {"pin_blit", control(live.pin_blit)},
+        {"main_partner", control(live.main_partner)},
+        {"pass_timing", control(live.pass_timing)},
+        {"sysmix_ahead", control(live.sysmix_ahead)},
         {"alias", [&] {
              json alias = json::object();
              for (size_t i = 0; i < Perf::AliasNames.size(); ++i) {
@@ -768,6 +772,14 @@ json PerfFlip(ToolState& state, const json& params) {
         live.pin_main = number(); // "default": on
     } else if (control == "pin_strict") {
         live.pin_strict = number(); // "default": on
+    } else if (control == "pin_blit") {
+        live.pin_blit = number(); // "default": on
+    } else if (control == "main_partner") {
+        live.main_partner = number(); // "default": on
+    } else if (control == "pass_timing") {
+        live.pass_timing = number(); // "default": The Duskbloods only
+    } else if (control == "sysmix_ahead") {
+        live.sysmix_ahead = number(); // "default": The Duskbloods only
     } else if (control == "dlss_preset") {
         // "default" follows the setting; a letter (M, K, J, ...) or "nvidia" overrides it.
         const std::string text = value.get<std::string>();
@@ -807,7 +819,8 @@ json PerfFlip(ToolState& state, const json& params) {
                                  "sync_submit, verify, backx, backx.<piece>, alias_sync_always, "
                                  "alias_full_resolve, alias_resync_upload, alias_diag, "
                                  "dlss_tight, dlss_hdr, dlss_auto_exposure, dlss_preset, "
-                                 "dusk_dlss_m, split_scale, rescale_pin, pin_main, pin_strict"};
+                                 "dusk_dlss_m, split_scale, rescale_pin, pin_main, pin_strict, "
+                                 "pin_blit, main_partner, pass_timing, sysmix_ahead"};
     }
     return ApplyLiveParams(state, params, live);
 }

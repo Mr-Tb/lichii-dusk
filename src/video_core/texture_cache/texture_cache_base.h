@@ -698,6 +698,10 @@ private:
     /// pin_main: when one of these images is the main frame, the pinned ones are released (their
     /// flip streak stays, so they can be pinned again). True when any was released.
     bool ReleaseNearMain(std::span<const ImageId> ids);
+    /// A pass that would take a main frame image to 1x: notes the targets holding it back
+    /// (Rescale line, main_blockers) and, with main_partner, true when all of them can follow
+    /// it up (held back only by their aliases).
+    bool RaiseMainPartners(std::span<const ImageId> ids);
     /// pin_strict: a pinned image stays at 1x on every path.
     [[nodiscard]] bool PinBlocks(const ImageBase& image) const noexcept {
         return pin_strict && Pinned(image);

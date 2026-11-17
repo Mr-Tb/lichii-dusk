@@ -1112,6 +1112,9 @@ bool TextureCache<P>::RescaleRenderTargets() {
                     }
                 }
             }
+            if (!can_rescale) {
+                can_rescale = RaiseMainPartners(ids);
+            }
         }
 
         if (can_rescale) {
@@ -1646,7 +1649,13 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
                      dst_image.info.size.width, dst_image.info.size.height,
                      dst_image.info.format, is_dst_rescaled);
         }
-        ReleaseNearMain(std::array{src_id, dst_id});
+        // pin_blit: a pinned destination stays at 1x (the blit reads the scaled source at its own
+        // size); only a main frame destination releases the pins, so its source can follow it.
+        // The Duskbloods' history fill (scaled upscaler output into the RGBA16F history the next
+        // frame's imageStore writes at 1x) raised the history every frame and lowered it again.
+        if (!Nx2Perf::LiveOr(Nx2Perf::g_pin_blit, true) || IsMain(dst_image)) {
+            ReleaseNearMain(std::array{src_id, dst_id});
+        }
         if (ImageCanRescale(src_image)) {
             ScaleUp(src_image, Nx2Perf::RescaleReason::Blit);
             is_src_rescaled = True(src_image.flags & ImageFlagBits::Rescaled);
@@ -3271,6 +3280,45 @@ bool TextureCache<P>::ReleaseNearMain(std::span<const ImageId> ids) {
         }
     }
     return released;
+}
+
+template <class P>
+bool TextureCache<P>::RaiseMainPartners(std::span<const ImageId> ids) {
+    const auto valid = [](ImageId id) { return id && id != CORRUPT_ID; };
+    if (!pin_active || std::ranges::none_of(ids, [&](ImageId id) {
+            return valid(id) && IsMain(slot_images[id]);
+        })) {
+        return false;
+    }
+    bool raise = Nx2Perf::LiveOr(Nx2Perf::g_main_partner, true);
+    for (const ImageId id : ids) {
+        if (!valid(id)) {
+            continue;
+        }
+        Image& image = slot_images[id];
+        if (ImageCanRescale(image) && !Pinned(image)) {
+            continue;
+        }
+        std::string_view why = "alias";
+        if (Pinned(image)) {
+            why = "pinned";
+        } else if (!image.info.rescaleable) {
+            why = "info";
+        } else if (True(image.flags & ImageFlagBits::SplitNative) && SplitScale()) {
+            why = "split";
+        } else if (Settings::values.resolution_info.downscale) {
+            why = "downscale";
+        }
+        // Only an image held back by its aliases can follow: the alias sync and CopyImage
+        // reconcile the scales afterwards.
+        raise &= why == "alias";
+        Nx2Perf::NotePartnerBlock(image.gpu_addr, image.info.size.width, image.info.size.height,
+                                  why, [&image] { return fmt::format("{}", image.info.format); });
+    }
+    if (raise) {
+        Nx2Perf::g_main_raised.fetch_add(1, std::memory_order_relaxed);
+    }
+    return raise;
 }
 
 template <class P>
