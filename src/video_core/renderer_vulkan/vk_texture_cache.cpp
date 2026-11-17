@@ -5092,6 +5092,26 @@ void Framebuffer::CreateFramebuffer(TextureCacheRuntime& runtime,
     if (num_layers == (std::numeric_limits<s32>::max)()) {
         num_layers = 1;
     }
+    {
+        const ImageView* first_color = nullptr;
+        for (const ImageView* const view : color_buffers) {
+            if (view) {
+                first_color = view;
+                break;
+            }
+        }
+        const ImageView* const sized = first_color ? first_color : depth_buffer;
+        pass_label = PassLabel{
+            .color_addr = first_color ? first_color->gpu_addr : 0,
+            .depth_addr = depth_buffer ? depth_buffer->gpu_addr : 0,
+            .width = sized ? sized->size.width : 0,
+            .height = sized ? sized->size.height : 0,
+            .color_format = first_color ? static_cast<u32>(first_color->format) : 0,
+            .depth_format = depth_buffer ? static_cast<u32>(depth_buffer->format) : 0,
+            .colors = static_cast<u32>(num_colors),
+            .scaled = is_rescaled,
+        };
+    }
     layers = static_cast<u32>((std::max)(num_layers, 1));
     LOG_DEBUG(Render_Vulkan,
               "Framebuffer layers: layers={}, color0_layers={}, depth_layers={}, attachments={}",

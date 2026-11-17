@@ -21,6 +21,7 @@
 #include "video_core/renderer_vulkan/vk_streamline_dlss.h"
 #endif
 #include "video_core/renderer_vulkan/vk_render_pass_cache.h"
+#include "video_core/renderer_vulkan/pass_label.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/image_view_base.h"
 #include "video_core/vulkan_common/vulkan_memory_allocator.h"
@@ -449,6 +450,11 @@ public:
         return is_rescaled;
     }
 
+    /// Its targets, for the per-pass GPU timing.
+    [[nodiscard]] const PassLabel& Label() const noexcept {
+        return pass_label;
+    }
+
     [[nodiscard]] bool DiscardsMsaaColor() const noexcept {
         return discard_msaa_color;
     }
@@ -484,6 +490,7 @@ private:
     RenderPassCache* render_pass_cache{nullptr};
     bool discard_msaa_color{};
     bool discard_msaa_depth_stencil{};
+    PassLabel pass_label{};
     mutable std::array<u32, NUM_MEMOIZED_RENDER_PASS_VARIANTS> variant_keys{};
     mutable std::array<VkRenderPass, NUM_MEMOIZED_RENDER_PASS_VARIANTS> variant_render_passes{};
     mutable u32 num_memoized_variants{};

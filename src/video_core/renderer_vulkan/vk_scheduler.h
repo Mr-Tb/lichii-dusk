@@ -29,6 +29,7 @@
 #include "common/settings.h"
 #include "video_core/gpu_split.h"
 #include "video_core/renderer_vulkan/fragment_barrier_state.h"
+#include "video_core/renderer_vulkan/pass_label.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
@@ -115,6 +116,16 @@ public:
         double upscale_max_ms{};
     };
     [[nodiscard]] GpuSplit TakeGpuSplit();
+
+    /// Per-pass GPU timing (pass_timing): one frame every 2 s gets a timestamp where each render
+    /// pass, run of dispatches or upscale starts; a few presents later the "Nx2Pass GPU" line
+    /// names the 8 costliest targets and compute shaders of that frame.
+    /// PassDispatch: recording thread, a native dispatch of this compute shader.
+    void PassDispatch(u64 hash) {
+        if (pass_sampling) [[unlikely]] {
+            PassNoteDispatch(hash);
+        }
+    }
     void TraceGraphicsPipeline(const std::array<u64, 6>& hashes);
     void TraceComputePipeline(u64 hash);
     /// Worker thread, inside a recorded command: timestamps one draw or dispatch of a sampled
@@ -582,6 +593,30 @@ private:
     void ReadGpuSplit(u64 frame);
     std::mutex split_mutex;
     GpuSplit split_totals;
+
+    // Per-pass timing (recording thread only; the query results are read there too).
+    enum class PassKind : u8 { Pass, Compute, Upscaler, Other };
+    struct PassSegment {
+        PassLabel label{};
+        u64 shader{};
+        u32 work{}; ///< draws, or dispatches
+        PassKind kind{PassKind::Other};
+    };
+    static constexpr u32 PassMaxMarks = 1024;
+    vk::QueryPool pass_query_pool;
+    std::vector<PassSegment> pass_segments;
+    u32 pass_count{};
+    bool pass_sampling{};
+    bool pass_pending{};
+    u32 pass_wait_presents{};
+    u64 pass_samples{};
+    const Framebuffer* pass_framebuffer{};
+    std::chrono::steady_clock::time_point pass_last_sample{};
+    void PassMark(const PassSegment& segment);
+    void PassNoteDraw(const Framebuffer* framebuffer);
+    void PassNoteDispatch(u64 hash);
+    void PassPresent();
+    void ReadPassSample();
 
     VideoCommon::QueryCacheBase<QueryCacheParams>* query_cache = nullptr;
 
