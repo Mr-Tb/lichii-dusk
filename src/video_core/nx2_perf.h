@@ -436,6 +436,15 @@ inline std::atomic<std::uint64_t> g_rescale_flips{};
 inline std::atomic<std::uint64_t> g_rescale_mismatches{};
 /// Images pinned at 1x (rescale_pin) in the last second.
 inline std::atomic<std::uint64_t> g_rescale_pins{};
+/// pin_main, in the last second: pins released (a main frame image, or one drawn with it), and
+/// main frame images scaled down.
+inline std::atomic<std::uint64_t> g_rescale_releases{};
+inline std::atomic<std::uint64_t> g_rescale_main_down{};
+/// Pins set since the last pin generation (not reset each second).
+inline std::atomic<std::uint64_t> g_rescale_pins_total{};
+/// The Duskbloods' upscales tried in the last second, and those with a scaled colour input.
+inline std::atomic<std::uint64_t> g_upscales_tried{};
+inline std::atomic<std::uint64_t> g_upscales_2x{};
 
 /// Why the texture cache changed an image's scale.
 enum class RescaleReason : std::uint8_t {
@@ -522,6 +531,10 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
     const std::uint64_t flips = g_rescale_flips.exchange(0, std::memory_order_relaxed);
     const std::uint64_t mismatches = g_rescale_mismatches.exchange(0, std::memory_order_relaxed);
     const std::uint64_t pins = g_rescale_pins.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t releases = g_rescale_releases.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t main_down = g_rescale_main_down.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t tried = g_upscales_tried.exchange(0, std::memory_order_relaxed);
+    const std::uint64_t upscales_2x = g_upscales_2x.exchange(0, std::memory_order_relaxed);
     const std::string up_by = RescaleReasonsText(0);
     const std::string down_by = RescaleReasonsText(1);
     std::vector<FlipImage> images;
@@ -529,7 +542,7 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
         std::scoped_lock lock{g_flip_images_mutex};
         images.swap(g_flip_images);
     }
-    if (up + down + mismatches + pins != 0) {
+    if (up + down + mismatches + pins + tried != 0) {
         std::sort(images.begin(), images.end(),
                   [](const FlipImage& a, const FlipImage& b) { return a.flips > b.flips; });
         std::string top;
@@ -543,8 +556,10 @@ inline void FlushRescaleStats(std::uint64_t now_ms) {
         }
         LOG_INFO(HW_GPU,
                  "Rescale (last second): up={} down={} flips={} mismatched_copies={} pinned={} "
-                 "up_by={} down_by={} top_flips=[{}]",
-                 up, down, flips, mismatches, pins, up_by, down_by, top);
+                 "up_by={} down_by={} top_flips=[{}] upscales_2x={}/{} released={} main_down={} "
+                 "pins_set_gen={}",
+                 up, down, flips, mismatches, pins, up_by, down_by, top, upscales_2x, tried,
+                 releases, main_down, g_rescale_pins_total.load(std::memory_order_relaxed));
     }
 }
 

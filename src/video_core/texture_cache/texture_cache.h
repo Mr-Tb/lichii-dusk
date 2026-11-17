@@ -1050,6 +1050,7 @@ bool TextureCache<P>::RescaleRenderTargets() {
         pin_main = main;
         pin_strict = strict;
         ++pin_generation;
+        Nx2Perf::g_rescale_pins_total.store(0, std::memory_order_relaxed);
     }
     u32 scale_rating = 0;
     bool rescaled = false;
@@ -1645,6 +1646,16 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
 
     const bool is_resolve = src_image.info.num_samples != 1 && dst_image.info.num_samples == 1;
     if (is_src_rescaled != is_dst_rescaled) {
+        if (static u32 logged{}; (Pinned(src_image) || Pinned(dst_image)) && logged < 16) {
+            ++logged;
+            LOG_INFO(HW_GPU,
+                     "Blit leaves pinned image at 1x: src {:#x} {}x{} fmt {} scaled={} -> dst "
+                     "{:#x} {}x{} fmt {} scaled={}",
+                     src_image.gpu_addr, src_image.info.size.width, src_image.info.size.height,
+                     src_image.info.format, is_src_rescaled, dst_image.gpu_addr,
+                     dst_image.info.size.width, dst_image.info.size.height,
+                     dst_image.info.format, is_dst_rescaled);
+        }
         if (ImageCanRescale(src_image)) {
             ScaleUp(src_image, Nx2Perf::RescaleReason::Blit);
             is_src_rescaled = True(src_image.flags & ImageFlagBits::Rescaled);
@@ -1931,6 +1942,12 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
                 .motion_scale = motion_scale,
                 .reset = !use_history,
             });
+            if (depth_target) {
+                Nx2Perf::g_upscales_tried.fetch_add(1, std::memory_order_relaxed);
+                if (rescaled(src_id)) {
+                    Nx2Perf::g_upscales_2x.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
         }
         // FSR 3.1 reads colour, motion and depth texel for texel: all at the colour's scale.
         if (depth_id && (rescaled(depth_id) != rescaled(src_id) ||
@@ -3210,6 +3227,9 @@ void TextureCache<P>::NoteRescale(Image& image, bool up, Nx2Perf::RescaleReason 
         image.rescale_change_tick != 0 && frame_tick + 1 - image.rescale_change_tick < 120;
     image.rescale_change_tick = frame_tick + 1;
     image.flip_streak = flip ? image.flip_streak + 1 : 0;
+    if (!up && pin_main && True(image.flags & ImageFlagBits::MainFrame)) {
+        Nx2Perf::g_rescale_main_down.fetch_add(1, std::memory_order_relaxed);
+    }
     Nx2Perf::NoteRescale(up, flip, reason, image.gpu_addr, image.info.size.width,
                          image.info.size.height,
                          [&image] { return fmt::format("{}", image.info.format); });
@@ -3227,6 +3247,7 @@ void TextureCache<P>::MaybePin(Image& image) {
     if (pin_active && image.flip_streak >= 3 && image.native_pin != pin_generation) {
         image.native_pin = pin_generation;
         Nx2Perf::g_rescale_pins.fetch_add(1, std::memory_order_relaxed);
+        Nx2Perf::g_rescale_pins_total.fetch_add(1, std::memory_order_relaxed);
     }
 }
 
@@ -3235,6 +3256,7 @@ void TextureCache<P>::ReleasePin(Image& image) {
     // pin_generation starts at 1 and only grows: 0 is never a current pin.
     if (Pinned(image)) {
         image.native_pin = 0;
+        Nx2Perf::g_rescale_releases.fetch_add(1, std::memory_order_relaxed);
     }
     image.flags |= ImageFlagBits::MainFrame;
 }
