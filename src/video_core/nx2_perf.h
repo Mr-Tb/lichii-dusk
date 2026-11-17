@@ -442,7 +442,8 @@ inline std::atomic<std::uint64_t> g_rescale_releases{};
 inline std::atomic<std::uint64_t> g_rescale_main_down{};
 /// Pins set since the last pin generation (not reset each second).
 inline std::atomic<std::uint64_t> g_rescale_pins_total{};
-/// The Duskbloods' upscales tried in the last second, and those with a scaled colour input.
+/// The Duskbloods' upscales tried in the last second, and those whose colour was drawn scaled
+/// (not one the upscaler raised from 1x).
 inline std::atomic<std::uint64_t> g_upscales_tried{};
 inline std::atomic<std::uint64_t> g_upscales_2x{};
 

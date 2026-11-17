@@ -1888,6 +1888,8 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         const auto rescaled = [&](ImageId id) {
             return True(slot_images[id].flags & ImageFlagBits::Rescaled);
         };
+        // Before the upscaler raises it: a colour drawn at 1x and raised here is 1x content.
+        const bool src_drawn_scaled = rescaled(src_id);
         if (depth_target && SplitScale()) {
             // Split scale: the upscaler's inputs, and the passes that draw them with them, stay
             // at 1x; its output (and what follows) keeps the resolution scale.
@@ -1944,7 +1946,7 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
             });
             if (depth_target) {
                 Nx2Perf::g_upscales_tried.fetch_add(1, std::memory_order_relaxed);
-                if (rescaled(src_id)) {
+                if (src_drawn_scaled && rescaled(src_id)) {
                     Nx2Perf::g_upscales_2x.fetch_add(1, std::memory_order_relaxed);
                 }
             }
