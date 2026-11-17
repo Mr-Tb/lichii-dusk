@@ -687,8 +687,17 @@ private:
         return pin_active && image.native_pin == pin_generation;
     }
     void MaybePin(Image& image);
-    /// pin_main: unpins a main frame image and marks it MainFrame.
+    /// pin_main: unpins an image.
     void ReleasePin(Image& image);
+    /// pin_main: an image The Duskbloods' upscaler took in the last two frames (its colour,
+    /// motion, depth and output; only the output under split scale). Never pinned, and wins
+    /// over pinned partners.
+    [[nodiscard]] bool IsMain(const ImageBase& image) const noexcept {
+        return pin_main && image.main_tick != 0 && frame_tick <= image.main_tick + 1;
+    }
+    /// pin_main: when one of these images is the main frame, the pinned ones are released (their
+    /// flip streak stays, so they can be pinned again). True when any was released.
+    bool ReleaseNearMain(std::span<const ImageId> ids);
     /// pin_strict: a pinned image stays at 1x on every path.
     [[nodiscard]] bool PinBlocks(const ImageBase& image) const noexcept {
         return pin_strict && Pinned(image);

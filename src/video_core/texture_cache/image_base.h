@@ -62,9 +62,6 @@ enum class ImageFlagBits : u32 {
     SparseTiles = 1 << 23,
     /// An input of The Duskbloods' upscaler: it stays at 1x while split scale is on.
     SplitNative = 1 << 24,
-    /// The Duskbloods' main frame (the upscaler's images and the targets drawn with them): never
-    /// pinned; wins over pinned partners.
-    MainFrame = 1 << 25,
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
@@ -124,6 +121,7 @@ struct ImageBase {
     u64 rescale_change_tick = 0; ///< frame_tick + 1 of the last ScaleUp/ScaleDown that changed it
     u32 flip_streak = 0; ///< scale changes in a row, each within 120 frames of the one before
     u32 native_pin = 0;  ///< TextureCache::pin_generation while pinned at 1x (rescale_pin)
+    u64 main_tick = 0;   ///< frame_tick + 1 of the last upscale that took it (TextureCache::IsMain)
     bool has_scaled = false;
 
     /// The channel and GPU address space whose page table RegisterImage put the image in.

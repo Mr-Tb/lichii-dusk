@@ -1099,27 +1099,17 @@ bool TextureCache<P>::RescaleRenderTargets() {
         check_rescale(render_targets.depth_buffer_id, tmp_depth_image);
         if (pin_active && pin_main) {
             // pin_main: a pass drawing a main frame image and a pinned one releases the pinned
-            // ones (and marks them main frame too), so a pin never drags the main frame to 1x.
+            // ones, so a pin never drags the main frame to 1x.
             std::array<ImageId, NUM_RT + 1> ids{};
             std::ranges::copy(tmp_color_images, ids.begin());
             ids.back() = tmp_depth_image;
-            const auto bound = [](ImageId id) { return id != CORRUPT_ID; };
-            const auto has_main = std::ranges::any_of(ids, [&](ImageId id) {
-                return bound(id) && True(slot_images[id].flags & ImageFlagBits::MainFrame);
-            });
-            const auto has_pinned = std::ranges::any_of(
-                ids, [&](ImageId id) { return bound(id) && Pinned(slot_images[id]); });
-            if (has_main && has_pinned) {
+            if (ReleaseNearMain(ids)) {
                 can_rescale = true;
                 for (const ImageId id : ids) {
-                    if (!bound(id)) {
-                        continue;
+                    if (id != CORRUPT_ID) {
+                        Image& image = slot_images[id];
+                        can_rescale &= ImageCanRescale(image) && !Pinned(image);
                     }
-                    Image& image = slot_images[id];
-                    if (Pinned(image)) {
-                        ReleasePin(image);
-                    }
-                    can_rescale &= ImageCanRescale(image) && !Pinned(image);
                 }
             }
         }
@@ -1872,13 +1862,10 @@ bool TextureCache<P>::TemporalUpscale(const Tegra::Engines::Fermi2D::Surface& ds
         if (depth_target && pin_main) {
             // pin_main: the upscaler's images are the main frame; under split scale only its
             // output (the inputs stay at 1x by design).
-            if (SplitScale()) {
-                ReleasePin(slot_images[dst_id]);
-            } else {
-                for (const ImageId id : {src_id, motion_id, dst_id, depth_id}) {
-                    if (id) {
-                        ReleasePin(slot_images[id]);
-                    }
+            for (const ImageId id : {src_id, motion_id, dst_id, depth_id}) {
+                if (id && (id == dst_id || !SplitScale())) {
+                    ReleasePin(slot_images[id]);
+                    slot_images[id].main_tick = frame_tick + 1;
                 }
             }
             last_upscale_tick = frame_tick;
@@ -3235,7 +3222,7 @@ void TextureCache<P>::NoteRescale(Image& image, bool up, Nx2Perf::RescaleReason 
         image.rescale_change_tick != 0 && frame_tick + 1 - image.rescale_change_tick < 120;
     image.rescale_change_tick = frame_tick + 1;
     image.flip_streak = flip ? image.flip_streak + 1 : 0;
-    if (!up && pin_main && True(image.flags & ImageFlagBits::MainFrame)) {
+    if (!up && IsMain(image)) {
         Nx2Perf::g_rescale_main_down.fetch_add(1, std::memory_order_relaxed);
     }
     Nx2Perf::NoteRescale(up, flip, reason, image.gpu_addr, image.info.size.width,
@@ -3247,8 +3234,7 @@ template <class P>
 void TextureCache<P>::MaybePin(Image& image) {
     // pin_main: never the main frame, and only in gameplay (no upscale on loading screens, where
     // 120 frames span seconds).
-    if (pin_main && (True(image.flags & ImageFlagBits::MainFrame) ||
-                     frame_tick > last_upscale_tick + 2)) {
+    if (pin_main && (IsMain(image) || frame_tick > last_upscale_tick + 2)) {
         return;
     }
     // Three changes in a row: it went down, up and down again within a few frames.
@@ -3266,7 +3252,24 @@ void TextureCache<P>::ReleasePin(Image& image) {
         image.native_pin = 0;
         Nx2Perf::g_rescale_releases.fetch_add(1, std::memory_order_relaxed);
     }
-    image.flags |= ImageFlagBits::MainFrame;
+}
+
+template <class P>
+bool TextureCache<P>::ReleaseNearMain(std::span<const ImageId> ids) {
+    const auto valid = [](ImageId id) { return id && id != CORRUPT_ID; };
+    if (!pin_active || std::ranges::none_of(ids, [&](ImageId id) {
+            return valid(id) && IsMain(slot_images[id]);
+        })) {
+        return false;
+    }
+    bool released = false;
+    for (const ImageId id : ids) {
+        if (valid(id) && Pinned(slot_images[id])) {
+            ReleasePin(slot_images[id]);
+            released = true;
+        }
+    }
+    return released;
 }
 
 template <class P>
@@ -4723,9 +4726,7 @@ void TextureCache<P>::CopyImage(ImageId dst_id, ImageId src_id, std::vector<Imag
     if (True(src.flags & ImageFlagBits::Rescaled) != True(dst.flags & ImageFlagBits::Rescaled)) {
         Image& lower = True(src.flags & ImageFlagBits::Rescaled) ? dst : src;
         Image& higher = True(src.flags & ImageFlagBits::Rescaled) ? src : dst;
-        if (pin_main && True(higher.flags & ImageFlagBits::MainFrame) && Pinned(lower)) {
-            ReleasePin(lower);
-        }
+        ReleaseNearMain(std::array{src_id, dst_id});
         if (!(ImageCanRescale(lower) && ScaleUp(lower, Nx2Perf::RescaleReason::Copy))) {
             ScaleDown(higher, Nx2Perf::RescaleReason::Copy);
         }
