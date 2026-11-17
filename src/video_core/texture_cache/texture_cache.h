@@ -1646,6 +1646,7 @@ bool TextureCache<P>::BlitImage(const Tegra::Engines::Fermi2D::Surface& dst,
                      dst_image.info.size.width, dst_image.info.size.height,
                      dst_image.info.format, is_dst_rescaled);
         }
+        ReleaseNearMain(std::array{src_id, dst_id});
         if (ImageCanRescale(src_image)) {
             ScaleUp(src_image, Nx2Perf::RescaleReason::Blit);
             is_src_rescaled = True(src_image.flags & ImageFlagBits::Rescaled);
@@ -3396,6 +3397,13 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
     ForEachSparseImageInRegion(channel_state->gpu_memory.GetID(), gpu_addr, size_bytes,
                                region_check_gpu);
 
+    if (pin_active && pin_main) {
+        boost::container::small_vector<ImageId, 4> ids;
+        for (const auto& copy : join_copies_to_do) {
+            ids.push_back(copy.id);
+        }
+        ReleaseNearMain(ids);
+    }
     bool can_rescale = info.rescaleable;
     bool any_rescaled = false;
     for (const auto& copy : join_copies_to_do) {
@@ -3651,6 +3659,10 @@ ImageId TextureCache<P>::JoinImages(const ImageInfo& info, GPUVAddr gpu_addr, DA
         RefreshContents(new_image, new_image_id);
     }
 
+    // The joined image is the main frame if one it replaces was.
+    for (const auto& copy : join_copies_to_do) {
+        new_image.main_tick = (std::max)(new_image.main_tick, slot_images[copy.id].main_tick);
+    }
     if (can_rescale) {
         ScaleUp(new_image, Nx2Perf::RescaleReason::Join);
     } else {
@@ -4594,6 +4606,13 @@ void TextureCache<P>::SynchronizeAliases(ImageId image_id, bool after_upload) {
         return;
     }
     Perf::NoteAlias(Perf::AliasStat::Synced, diag_width, diag_height);
+    if (pin_active && pin_main) {
+        boost::container::small_vector<ImageId, 9> ids{image_id};
+        for (const AliasedImage* const aliased : aliased_images) {
+            ids.push_back(aliased->id);
+        }
+        ReleaseNearMain(ids);
+    }
     const bool can_rescale = ImageCanRescale(image);
     if (any_rescaled) {
         if (can_rescale) {
