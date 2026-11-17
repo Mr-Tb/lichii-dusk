@@ -610,8 +610,11 @@ private:
         u64 shader{};
         u32 work{}; ///< draws, or dispatches
         PassKind kind{PassKind::Other};
+        /// Other: the call that asked for work outside a render pass (a copy, blit or clear).
+        const char* file{};
+        u32 line{};
     };
-    static constexpr u32 PassMaxMarks = 1024;
+    static constexpr u32 PassMaxMarks = 4096;
     vk::QueryPool pass_query_pool;
     std::vector<PassSegment> pass_segments;
     u32 pass_count{};

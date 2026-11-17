@@ -541,6 +541,9 @@ void Scheduler::ReadPassSample() {
                    a.label.height == b.label.height && a.label.scaled == b.label.scaled;
         case PassKind::Compute:
             return a.shader == b.shader;
+        case PassKind::Other:
+            return a.line == b.line && std::string_view{a.file ? a.file : ""} ==
+                                           std::string_view{b.file ? b.file : ""};
         default:
             return true;
         }
@@ -563,7 +566,7 @@ void Scheduler::ReadPassSample() {
     const double total = ms(results[0].timestamp, results[count - 1].timestamp);
     std::ranges::sort(groups, [](const Group& a, const Group& b) { return a.ms > b.ms; });
     std::string top;
-    for (size_t i = 0; i < groups.size() && i < 8; ++i) {
+    for (size_t i = 0; i < groups.size() && i < 14; ++i) {
         const Group& group = groups[i];
         const PassSegment& s = group.segment;
         const double share = total > 0 ? group.ms * 100.0 / total : 0.0;
@@ -602,9 +605,16 @@ void Scheduler::ReadPassSample() {
         case PassKind::Submit:
             what = fmt::format("between submits (GPU idle + uploads) {}", group.runs);
             break;
-        case PassKind::Other:
-            what = fmt::format("copies/clears/blits in {}", group.runs);
+        case PassKind::Other: {
+            std::string_view site{s.file ? s.file : "other"};
+            if (const size_t slash = site.find_last_of("/\\"); slash != std::string_view::npos) {
+                site.remove_prefix(slash + 1);
+            }
+            what = s.line != 0 ? fmt::format("copies/clears/blits {}:{} in {}", site, s.line,
+                                             group.runs)
+                               : fmt::format("copies/clears/blits in {}", group.runs);
             break;
+        }
         }
         top += fmt::format("{}[{:.2f} ms {:.0f}% {}]", top.empty() ? "" : " ", group.ms, share,
                            what);
@@ -822,9 +832,19 @@ void Scheduler::RequestRenderpass(const Framebuffer* framebuffer, std::source_lo
 }
 
 void Scheduler::RequestOutsideRenderPassOperationContext(std::source_location location) {
-    if (pass_sampling && pass_framebuffer) [[unlikely]] {
-        // Copies, blits and clears after a pass count apart from it.
-        PassMark({.kind = PassKind::Other});
+    if (pass_sampling) [[unlikely]] {
+        // Copies, blits and clears count apart from passes, by the call that asked for them; a
+        // rescale or upscale keeps its own segment.
+        const PassSegment* const last = pass_count != 0 ? &pass_segments[pass_count - 1] : nullptr;
+        const bool inside = last && (last->kind == PassKind::Rescale ||
+                                     last->kind == PassKind::Upscaler);
+        const bool same_site = last && last->kind == PassKind::Other && last->file &&
+                               last->line == location.line() &&
+                               std::string_view{last->file} == location.file_name();
+        if (pass_framebuffer || (!inside && !same_site)) {
+            PassMark({.kind = PassKind::Other, .file = location.file_name(),
+                      .line = location.line()});
+        }
         pass_framebuffer = nullptr;
     }
     if (state.renderpass) {
