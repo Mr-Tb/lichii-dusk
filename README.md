@@ -15,7 +15,7 @@
 <summary><b>English: open the guide</b></summary>
 
 **This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, build 177), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with an NVIDIA GPU and an Intel CPU.**
-It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.4.0) is included in the zip.
+It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.3.2) is included in the zip.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
 
@@ -30,7 +30,7 @@ It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by
   - Bot Match crashes (the game's heap ran out)
   - red "laser" lines and brightness flicker in the hub
   - jagged, pixelated HUD and text when the internal resolution is above 1x (the window downscale now averages pixels)
-- **Launcher playDB-CNT 1.4.0** included; offline mode works. The zip was updated on 2026-11-15 (v3 first shipped with 1.3.2). New in 1.4.0: named CPU players in Bot Match, an **Allow in firewall** button and a lobby report while hosting.
+- **Launcher playDB-CNT 1.3.2** included; offline mode works. On 2026-11-17 the zip went back from launcher 1.4.0 to 1.3.2, because Windows antivirus flagged 1.4.0 on some PCs.
 
 ## Performance
 
@@ -87,7 +87,7 @@ The first minutes stutter while shaders compile; this improves with each session
 
 ## Launcher setup
 
-`Play.Duskbloods.exe` (playDB-CNT 1.4.0) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
+`Play.Duskbloods.exe` (playDB-CNT 1.3.2) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
 
 1. Run `Play.Duskbloods.exe`.
 2. **Setup tab > Game:** press **Folder** and pick the unpacked `THE DUSKBLOODS NETWORK TEST VER` folder (the one with `base\exefs\main`), or **Browse** for a `.nup` file. It must say *The Duskbloods network test found*. A game folder in or next to the Lichii folder is found automatically.
@@ -95,7 +95,7 @@ The first minutes stutter while shaders compile; this improves with each session
 4. **Online tab:** keep **Just me** (the default). **Host a room** and **Join a room** are online tests with friends, and their matches do not start yet.
 5. Press **Start game** and keep the launcher open while you play.
 
-*Just me* needs no firewall change: everything stays on 127.0.0.1. To host or join a room, press **Allow in firewall** in the Online tab once (new in 1.4.0).
+*Just me* needs no firewall change: everything stays on 127.0.0.1. To host or join a room, allow the launcher and `lichii.exe` through Windows Firewall when Windows asks.
 
 ## NVIDIA DLSS (optional)
 
@@ -166,7 +166,7 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 <div dir="rtl">
 
 **هذا المشروع نسخة معدّلة (fork) من [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2، الإصدار 177)، ومحسّنة لتشغيل *The Duskbloods Network Test* (رقم البرنامج `0400D1D02399A000`) على أجهزة Windows بكرت شاشة NVIDIA ومعالج Intel.**
-يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.4.0) موجود داخل الملف المضغوط.
+يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.3.2) موجود داخل الملف المضغوط.
 
 > المشروع غير تابع لـ Nintendo أو FromSoftware أو المشاريع الأصلية. لا يتضمن أي ألعاب أو مفاتيح أو firmware. استخدم فقط ملفات استخرجتها بنفسك بطريقة قانونية.
 
@@ -181,7 +181,7 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
   - انهيار اللعبة في Bot Match (نفاد ذاكرة اللعبة)
   - الخطوط الحمراء ("الليزر") ووميض الإضاءة في الـ hub
   - تشوّه وتكسّر الواجهة والنصوص عند رفع الدقة الداخلية فوق 1x (تصغير الصورة للنافذة يأخذ الآن متوسط البكسلات)
-- **مشغّل playDB-CNT الإصدار 1.4.0** مرفق، ووضع اللعب دون اتصال (offline) يعمل. حُدِّث الملف المضغوط في 2026-11-15 (صدر الإصدار الثالث أولًا مع 1.3.2). الجديد في 1.4.0: أسماء لشخصيات الكمبيوتر في Bot Match، وزر **Allow in firewall**، وتقرير عن الغرفة في السجلّ أثناء الاستضافة.
+- **مشغّل playDB-CNT الإصدار 1.3.2** مرفق، ووضع اللعب دون اتصال (offline) يعمل. في 2026-11-17 أعدنا المشغّل في الملف المضغوط من 1.4.0 إلى 1.3.2، لأن برامج الحماية في Windows صنّفت 1.4.0 كتهديد على بعض الأجهزة.
 
 ## الأداء
 
@@ -238,7 +238,7 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 
 ## إعداد المشغّل
 
-المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.4.0) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
+المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.3.2) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
 
 1. شغّل `Play.Duskbloods.exe`.
 2. **تبويب Setup > Game:** اضغط **Folder** واختر مجلد اللعبة `THE DUSKBLOODS NETWORK TEST VER` (الذي يحتوي على `base\exefs\main`)، أو اضغط **Browse** لاختيار ملف `.nup`. يجب أن تظهر العبارة *The Duskbloods network test found*. إذا كان مجلد اللعبة داخل مجلد Lichii أو بجانبه، يجده المشغّل تلقائيًا.
@@ -246,7 +246,7 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 4. **تبويب Online:** اترك **Just me** (الخيار الافتراضي). أما **Host a room** و**Join a room** فهما لتجارب اللعب مع الأصدقاء، والمباريات فيهما لا تبدأ بعد.
 5. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
 
-وضع *Just me* لا يحتاج أي تغيير في جدار الحماية (Firewall)، فكل شيء يبقى على 127.0.0.1. لاستضافة غرفة أو الانضمام إليها، اضغط **Allow in firewall** في تبويب Online مرة واحدة (جديد في 1.4.0).
+وضع *Just me* لا يحتاج أي تغيير في جدار الحماية (Firewall)، فكل شيء يبقى على 127.0.0.1. لاستضافة غرفة أو الانضمام إليها، اسمح للمشغّل ولـ `lichii.exe` بالمرور عبر جدار حماية Windows عندما يطلب Windows ذلك.
 
 ## NVIDIA DLSS (اختياري)
 
