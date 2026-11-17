@@ -2899,9 +2899,13 @@ ImageId TextureCache<P>::FindImage(const ImageInfo& info, GPUVAddr gpu_addr,
 
 template <class P>
 bool TextureCache<P>::ImageCanRescale(ImageBase& image) {
-    if (PinBlocks(image)) {
-        return false;
-    }
+    // pin_strict holds the image itself, not the images aliasing it: the alias sync and
+    // CopyImage reconcile those.
+    return !PinBlocks(image) && ImageCanRescaleUnpinned(image);
+}
+
+template <class P>
+bool TextureCache<P>::ImageCanRescaleUnpinned(ImageBase& image) {
     if (!image.info.rescaleable) {
         return false;
     }
@@ -2931,7 +2935,7 @@ bool TextureCache<P>::ImageCanRescale(ImageBase& image) {
     image.flags |= ImageFlagBits::CheckingRescalable;
     for (const auto& alias : image.aliased_images) {
         Image& other_image = slot_images[alias.id];
-        if (!ImageCanRescale(other_image)) {
+        if (!ImageCanRescaleUnpinned(other_image)) {
             image.flags &= ~ImageFlagBits::CheckingRescalable;
             return false;
         }

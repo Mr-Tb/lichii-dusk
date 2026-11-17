@@ -669,6 +669,7 @@ private:
                                                       bool mark_as_modified);
 
     bool ImageCanRescale(ImageBase& image);
+    bool ImageCanRescaleUnpinned(ImageBase& image);
     /// The Duskbloods' split scale is on (see DlssMode::SplitScaleActive).
     [[nodiscard]] static bool SplitScale() {
         const auto& resolution = Settings::values.resolution_info;
