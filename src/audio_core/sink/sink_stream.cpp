@@ -98,7 +98,8 @@ u32 SinkStream::SysmixQueueLimit() const {
     constexpr u64 MinimumBlocks = 3;
     const u64 ring_blocks = SampleRingCapacity / (u64{TargetSampleCount} * device_channels) - 1;
     const u64 request = largest_request_frames.load(std::memory_order_relaxed);
-    const u64 blocks = (request + TargetSampleCount - 1) / TargetSampleCount + 1;
+    const u64 blocks = (request + TargetSampleCount - 1) / TargetSampleCount + 1 +
+                       sysmix_extra_blocks.load(std::memory_order_relaxed);
     return static_cast<u32>(std::clamp<u64>(blocks, MinimumBlocks, (std::min<u64>)(ring_blocks, 64)));
 }
 

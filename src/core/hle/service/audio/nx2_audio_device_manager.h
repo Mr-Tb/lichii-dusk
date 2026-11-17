@@ -17,6 +17,7 @@
 
 #include <fmt/ranges.h>
 
+#include "common/settings.h"
 #include "common/string_util.h"
 #include "audio_core/audio_core.h"
 #include "core/core.h"
@@ -30,6 +31,7 @@
 #include "core/hle/service/ipc_helpers.h"
 #include "core/hle/service/kernel_helpers.h"
 #include "core/hle/service/service.h"
+#include "video_core/nx2_perf.h"
 
 namespace Service::Audio {
 
@@ -69,6 +71,16 @@ struct Nx2SysmixStreams {
                         break;
                     }
                     --catch_up.owed;
+                }
+                // sysmix_ahead (default The Duskbloods): up to two blocks more a tick until the
+                // deeper host queue is full, so a guest mixer stalled behind a GPU-bound frame
+                // drains that queue instead of leaving gaps.
+                const bool ahead = VideoCommon::Nx2Perf::LiveOr(
+                    VideoCommon::Nx2Perf::g_sysmix_ahead,
+                    Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL);
+                for (auto& [id, stream] : streams) {
+                    for (int extra = 0; extra < 2 && stream->PumpAhead(ahead); ++extra) {
+                    }
                 }
             }
             return std::optional<std::chrono::nanoseconds>{interval * (missed + 1)};

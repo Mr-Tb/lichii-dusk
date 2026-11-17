@@ -523,6 +523,26 @@ bool SysmixOutput::Pump(SysmixCatchUp* catch_up) {
     return true;
 }
 
+bool SysmixOutput::PumpAhead(bool ahead) {
+    auto& p = *impl;
+    {
+        std::unique_lock lock{p.mutex, std::try_to_lock};
+        if (!lock || !p.open || p.faulted || p.input_stream || !p.engaged || !p.host ||
+            p.system.IsShuttingDown()) {
+            return false;
+        }
+        // 8 blocks (40 ms) more than the host's minimum: what the guest ring holds in a stall of
+        // the guest mixer (The Duskbloods' frames over 40 ms at 2x) still plays.
+        p.host->SetSysmixExtraBlocks(ahead ? 8 : 0);
+        u32 read{}, write{}, filled{};
+        if (!ahead || !p.ReadOccupancy(read, write, filled) || filled < BlockFrames ||
+            p.host->GetQueueSize() >= p.host->SysmixQueueLimit()) {
+            return false;
+        }
+    }
+    return Pump();
+}
+
 Kernel::KReadableEvent* SysmixOutput::GetStateEvent() {
     return impl->state_event ? &impl->state_event->GetReadableEvent() : nullptr;
 }

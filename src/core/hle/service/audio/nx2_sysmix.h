@@ -60,6 +60,10 @@ public:
     u32 GetState() const;
     /// Moves at most one block between the host and the guest ring; true when it moved one.
     bool Pump(SysmixCatchUp* catch_up = nullptr);
+    /// sysmix_ahead (ahead): lets the host queue hold more blocks and moves one more whole block
+    /// while it has room; true when it moved one. Without it the host queue limit returns to its
+    /// minimum.
+    bool PumpAhead(bool ahead);
     Kernel::KReadableEvent* GetStateEvent();
     Kernel::KReadableEvent* GetDataEvent();
     SysmixOutputCounters GetCounters() const;
