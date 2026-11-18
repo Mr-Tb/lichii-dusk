@@ -167,6 +167,7 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
     u64 gc_deletes{};
     u64 gc_costly_deletes{};
     u64 gc_download_deletes{}; ///< Evictions that downloaded the image first (a full GPU wait)
+    u64 gc_kept_written{};     ///< GPU-written images kept while host commit bounds the cache
     u64 async_decodes_queued{};
     u64 images_created{};
     u64 images_uploaded{};   ///< Image contents uploaded from guest memory (last 600 frames)
@@ -183,6 +184,10 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
     /// (6.48 GB) and the collector deleted ~40 recently used images a frame again; images that
     /// do not fit add to the out-of-memory margin.
     u64 retention_limit{};
+    /// Host commit, not the device budget, sets the critical threshold, and the commit the
+    /// system can still hand out (at the last threshold check).
+    bool commit_bound{};
+    u64 host_commit_room{};
     u64 logged_critical_memory{}; ///< The critical threshold of the last thresholds line logged
     u32 seen_pressure_events{};   ///< Allocator pressure events already answered
     u32 seen_failed_images{};     ///< Images the allocator could not make, already collected for
@@ -791,6 +796,16 @@ private:
     /// frame_tick of the last upscale with a depth target: pins are taken only in gameplay.
     u64 last_upscale_tick = 0;
     u32 pin_generation = 1;
+    /// rescale_pin: the pins by address, so an image the collector deleted and the game made again
+    /// (same size and format) starts pinned instead of bouncing again (289 pins in ten minutes of
+    /// The Duskbloods at 2x were all on images made again).
+    struct PinnedShape {
+        u32 width{};
+        u32 height{};
+        PixelFormat format{};
+        u32 generation{};
+    };
+    std::unordered_map<GPUVAddr, PinnedShape> pinned_shapes;
     u64 total_used_memory = 0;
     u64 minimum_memory;
     u64 expected_memory;

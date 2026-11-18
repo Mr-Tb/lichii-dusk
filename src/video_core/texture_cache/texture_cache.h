@@ -149,6 +149,18 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
     bool evict_old_costly = false;
     u64 ticks_to_destroy = 0;
     size_t num_iterations = 0;
+    // Host commit, not the device, bounds the cache and at least 1 GiB of it is left: an image
+    // the GPU wrote stays while it was used in the last MinEvictionAge frames, as with room. Its
+    // write-back waits for the whole GPU (~23 ms a time in The Duskbloods at 2x) and the game
+    // made it again at once, so deleting it freed nothing (14.8 images made and 15.0 deleted a
+    // frame). Under 1 GiB of commit, or once an image could not be made, it goes as before.
+    // EDEN_NX2_TC_KEEP_WRITTEN=0 turns this off.
+    static const bool keep_written_switch = [] {
+        const char* const value = std::getenv("EDEN_NX2_TC_KEEP_WRITTEN");
+        return !(value != nullptr && value[0] == '0');
+    }();
+    const bool keep_written =
+        keep_written_switch && !out_of_memory && commit_bound && host_commit_room >= 1_GiB;
     const auto Configure = [&](bool allow_aggressive) {
         high_priority_mode = out_of_memory || total_used_memory >= expected_memory;
         aggressive_mode =
@@ -165,7 +177,7 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
         num_iterations = aggressive_mode ? 40 : (high_priority_mode ? 20 : 10);
     };
     const auto Cleanup = [this, &num_iterations, &high_priority_mode, &aggressive_mode,
-                          &evict_old_costly, out_of_memory](ImageId image_id) {
+                          &evict_old_costly, out_of_memory, keep_written](ImageId image_id) {
         if (num_iterations == 0) {
             return true;
         }
@@ -181,6 +193,11 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
                                       Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL);
         if ((!aggressive_mode && !evict_old_costly && True(image.flags & ImageFlagBits::CostlyLoad)) ||
             (!high_priority_mode && must_download)) {
+            return false;
+        }
+        if (must_download && keep_written &&
+            frame_tick - lru_cache.Tick(image.lru_index) < MinEvictionAge) {
+            ++gc_kept_written;
             return false;
         }
         if (must_download) {
@@ -456,6 +473,8 @@ void TextureCache<P>::TickFrame() {
                         commit_room
                             ? HostCriticalMemory(runtime.GetDeviceMemoryUsage(), *commit_room)
                             : (std::numeric_limits<u64>::max)();
+                    commit_bound = host_critical < critical_memory;
+                    host_commit_room = commit_room ? *commit_room : 0;
                     critical_memory = (std::min)(critical_memory, host_critical);
                     const u64 room_margin = (std::min)(pressure_margin + slack_margin, budget / 2);
                     retention_limit = (std::min)(budget - room_margin, host_critical);
@@ -606,9 +625,9 @@ void TextureCache<P>::TickFrame() {
         if constexpr (requires { runtime.LogMemoryStatistics(); }) {
             runtime.LogMemoryStatistics();
         }
-        LOG_INFO(HW_GPU, "Texture cache last 600 frames: created {} images, deleted {} (collector {}, {} costly, {} downloaded), {} async decodes, ASTC {} opaque / {} alpha",
+        LOG_INFO(HW_GPU, "Texture cache last 600 frames: created {} images, deleted {} (collector {}, {} costly, {} downloaded, {} written kept), {} async decodes, ASTC {} opaque / {} alpha",
                  images_created, images_deleted, gc_deletes + gc_costly_deletes, gc_costly_deletes,
-                 gc_download_deletes,
+                 gc_download_deletes, gc_kept_written,
                  async_decodes_queued, astc_opaque_images, astc_alpha_images);
         LOG_INFO(HW_GPU, "Texture cache last 600 frames: {} uploads from guest memory, {} MiB (largest {} MiB, {} by layer)",
                  images_uploaded, uploaded_bytes >> 20, largest_upload >> 20, layer_uploads);
@@ -633,7 +652,8 @@ void TextureCache<P>::TickFrame() {
         created_shapes.clear();
         // The per-image and per-shape tallies only feed debug lines: skip them while those are off.
         debug_stats = Common::Log::IsLevelEnabled(Common::Log::Class::HW_GPU, Common::Log::Level::Debug);
-        gc_deletes = gc_costly_deletes = gc_download_deletes = async_decodes_queued = 0;
+        gc_deletes = gc_costly_deletes = gc_download_deletes = gc_kept_written =
+            async_decodes_queued = 0;
         images_created = images_deleted = 0;
     }
     // An image that could not be made at all: the driver is out of memory whatever the counts
@@ -1049,6 +1069,7 @@ bool TextureCache<P>::RescaleRenderTargets() {
         pin_main = main;
         pin_strict = strict;
         ++pin_generation;
+        pinned_shapes.clear();
         Nx2Perf::g_rescale_pins_total.store(0, std::memory_order_relaxed);
     }
     u32 scale_rating = 0;
@@ -3253,6 +3274,11 @@ void TextureCache<P>::MaybePin(Image& image) {
     // Three changes in a row: it went down, up and down again within a few frames.
     if (pin_active && image.flip_streak >= 3 && image.native_pin != pin_generation) {
         image.native_pin = pin_generation;
+        if (pinned_shapes.size() >= 4096) {
+            pinned_shapes.clear();
+        }
+        pinned_shapes[image.gpu_addr] = {image.info.size.width, image.info.size.height,
+                                         image.info.format, pin_generation};
         Nx2Perf::g_rescale_pins.fetch_add(1, std::memory_order_relaxed);
         Nx2Perf::g_rescale_pins_total.fetch_add(1, std::memory_order_relaxed);
     }
@@ -3263,6 +3289,7 @@ void TextureCache<P>::ReleasePin(Image& image) {
     // pin_generation starts at 1 and only grows: 0 is never a current pin.
     if (Pinned(image)) {
         image.native_pin = 0;
+        pinned_shapes.erase(image.gpu_addr);
         Nx2Perf::g_rescale_releases.fetch_add(1, std::memory_order_relaxed);
     }
 }
@@ -4249,6 +4276,14 @@ void TextureCache<P>::RegisterImage(ImageId image_id) {
     image.address_space = current_address_space;
     total_used_memory += ImageMemoryBytes(slot_images[image_id]);
     image.lru_index = lru_cache.Insert(image_id, frame_tick);
+    if (pin_active) {
+        if (const auto it = pinned_shapes.find(image.gpu_addr);
+            it != pinned_shapes.end() && it->second.generation == pin_generation &&
+            it->second.width == image.info.size.width &&
+            it->second.height == image.info.size.height && it->second.format == image.info.format) {
+            image.native_pin = pin_generation;
+        }
+    }
 
     ForEachGPUPage(image.gpu_addr, image.guest_size_bytes, [this, image_id](u64 page) {
         (*channel_state->gpu_page_table)[page].push_back(image_id);
