@@ -511,6 +511,27 @@ void Scheduler::PassPresent() {
     PassMark({.kind = PassKind::Other});
 }
 
+void Scheduler::NoteSubmitLockWait(std::chrono::steady_clock::duration waited) {
+    SubmitLockStats& stats = submit_lock_stats;
+    const auto now = std::chrono::steady_clock::now();
+    if (stats.window == std::chrono::steady_clock::time_point{}) {
+        stats.window = now;
+    }
+    const double ms = std::chrono::duration<double, std::milli>(waited).count();
+    ++stats.submits;
+    if (ms >= 0.05) {
+        ++stats.waited;
+        stats.wait_ms += ms;
+        stats.max_ms = (std::max)(stats.max_ms, ms);
+    }
+    if (now - stats.window >= std::chrono::seconds{10}) {
+        LOG_INFO(Render_Vulkan,
+                 "Submit lock in 10 s: {} submits, {} waited {:.1f} ms in all (longest {:.2f} ms)",
+                 stats.submits, stats.waited, stats.wait_ms, stats.max_ms);
+        stats = SubmitLockStats{.window = now};
+    }
+}
+
 void Scheduler::ReadPassSample() {
     struct Result {
         u64 timestamp;
@@ -583,6 +604,16 @@ void Scheduler::ReadPassSample() {
         ++it->runs;
     }
     const double total = ms(results[0].timestamp, results[count - 1].timestamp);
+    // The GPU's busy share of the frame: the rest is idle between submissions (or uploads).
+    double idle{};
+    u32 submits{};
+    for (const Group& group : groups) {
+        if (group.segment.kind == PassKind::Submit) {
+            idle += group.ms;
+            submits += group.runs;
+        }
+    }
+    const double busy = total > 0 ? 100.0 * (total - idle) / total : 0.0;
     std::ranges::sort(groups, [](const Group& a, const Group& b) { return a.ms > b.ms; });
     std::string top;
     for (size_t i = 0; i < groups.size() && i < 14; ++i) {
@@ -639,9 +670,9 @@ void Scheduler::ReadPassSample() {
                            what);
     }
     LOG_INFO(Render_Vulkan,
-             "Nx2Pass GPU sample {}: {:.2f} ms present to present, {} segments, {} draws, {} "
-             "dispatches; top: {}",
-             pass_samples, total, count - 1, draws, dispatches, top);
+             "Nx2Pass GPU sample {}: {:.2f} ms present to present, GPU busy {:.0f}% ({:.2f} ms "
+             "idle over {} submits), {} segments, {} draws, {} dispatches; top: {}",
+             pass_samples, total, busy, idle, submits, count - 1, draws, dispatches, top);
 }
 
 void Scheduler::DispatchWork() {
@@ -1530,7 +1561,9 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
             on_submit();
         }
 
+        const auto lock_start = std::chrono::steady_clock::now();
         std::scoped_lock lock{submit_mutex};
+        NoteSubmitLockWait(std::chrono::steady_clock::now() - lock_start);
         switch (const VkResult result = master_semaphore->SubmitQueue(
                     cmdbuf, upload_cmdbuf, signal_semaphore, wait_semaphore, signal_value)) {
         case VK_SUCCESS:

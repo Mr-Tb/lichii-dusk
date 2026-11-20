@@ -13,6 +13,7 @@
 #include <limits>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <tuple>
@@ -63,6 +64,7 @@
 #include "video_core/renderer_vulkan/vk_descriptor_pool.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_query_cache.h"
+#include "video_core/query_cache/report_slots.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
@@ -3464,6 +3466,70 @@ void RasterizerVulkan::FlushQueryResults(DAddr addr, u64 size) {
     if (addr == 0 || size == 0 || !query_cache.SemiFlushRegion(addr, size)) {
         return;
     }
+    // Lean wait (zortos293/Lichii#559, Fritchii EXP30): signal the fence carrying the pending
+    // reports, then wait for the reports in the range alone, not for every operation queued
+    // behind all the GPU work sent since. From 12 bytes before the read: a 16-byte report (value,
+    // then timestamp) starting there still has words in it. A report whose operation never runs
+    // would keep its slot unsettled: after 100 ms the wait below runs as before.
+    namespace Slots = VideoCommon::ReportSlots;
+    static const Slots::Mode lean_mode = Slots::ReadMode();
+    struct LeanStats {
+        std::chrono::steady_clock::time_point window = std::chrono::steady_clock::now();
+        u64 waits{}, wait_us{}, timeouts{}, checked{}, differ{};
+    };
+    static LeanStats stats;
+    const auto start = std::chrono::steady_clock::now();
+    const auto note = [&] {
+        const auto now = std::chrono::steady_clock::now();
+        ++stats.waits;
+        stats.wait_us += static_cast<u64>(
+            std::chrono::duration_cast<std::chrono::microseconds>(now - start).count());
+        if (now - stats.window >= std::chrono::seconds{10}) {
+            LOG_INFO(Render_Vulkan,
+                     "Lean report wait in 10 s: {} waits, {:.1f} ms, {} fell back after 100 ms; "
+                     "verify {} checked, {} differ",
+                     stats.waits, static_cast<double>(stats.wait_us) / 1000.0, stats.timeouts,
+                     stats.checked, stats.differ);
+            stats = LeanStats{.window = now};
+        }
+    };
+    std::array<u8, 256> lean_words{};
+    const size_t checked_bytes = (std::min)(static_cast<size_t>(size), lean_words.size());
+    bool lean_settled{};
+    if (lean_mode != Slots::Mode::Off) {
+        fence_manager.SignalFence([] {});
+        scheduler.FlushDeferred();
+        const DAddr wait_begin = addr >= 12 ? addr - 12 : DAddr{0};
+        lean_settled =
+            Slots::WaitSettled(wait_begin, addr + size - wait_begin, std::chrono::milliseconds{100});
+        if (!lean_settled) {
+            ++stats.timeouts;
+        } else if (lean_mode == Slots::Mode::On) {
+            note();
+            return;
+        } else {
+            device_memory.ReadBlockUnsafe(addr, lean_words.data(), checked_bytes);
+        }
+    }
+    SCOPE_EXIT {
+        if (lean_mode == Slots::Mode::Off) {
+            return;
+        }
+        if (lean_settled) {
+            std::array<u8, 256> words{};
+            device_memory.ReadBlockUnsafe(addr, words.data(), checked_bytes);
+            ++stats.checked;
+            if (std::memcmp(words.data(), lean_words.data(), checked_bytes) != 0) {
+                ++stats.differ;
+                if (stats.differ <= 16) {
+                    LOG_ERROR(Render_Vulkan,
+                              "Lean report wait: {:#x}+{:#x} changed after it settled", addr,
+                              size);
+                }
+            }
+        }
+        note();
+    };
     // Below High GPU accuracy a fence runs its own callback at once, so wait for an operation
     // queued behind the pending report writes instead. On the split's back the fence's
     // submission may be deferred, and the fencing thread would wait for this thread to submit it.

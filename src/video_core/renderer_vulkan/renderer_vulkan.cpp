@@ -227,6 +227,59 @@ void LogSetupWarnings(const Device& device, VideoCore::FrameGenState frame_gen_s
     }
 }
 
+/// Every frame interval of the session in 0.1 ms buckets (the last one: 2 s or more), for the
+/// "Nx2Summary run" line when the game stops.
+struct RunFrames {
+    static constexpr size_t Buckets = 20001;
+    std::array<u32, Buckets> histogram{};
+    u64 frames{};
+    double sum_ms{};
+    u64 over_100ms{};
+    float longest_ms{};
+
+    void Add(float ms) {
+        ++histogram[(std::min)(static_cast<size_t>(ms * 10.0f), Buckets - 1)];
+        ++frames;
+        sum_ms += ms;
+        over_100ms += ms > 100.0f ? 1 : 0;
+        longest_ms = (std::max)(longest_ms, ms);
+    }
+
+    /// The frame time `share` of the frames reach or exceed.
+    [[nodiscard]] double Slowest(double share) const {
+        const u64 target = (std::max)(u64{1}, static_cast<u64>(static_cast<double>(frames) * share));
+        u64 seen{};
+        for (size_t bucket = Buckets; bucket-- > 0;) {
+            seen += histogram[bucket];
+            if (seen >= target) {
+                return static_cast<double>(bucket) / 10.0;
+            }
+        }
+        return 0.0;
+    }
+};
+
+RunFrames& Run() {
+    static RunFrames run;
+    return run;
+}
+
+/// "Nx2Summary run:" once, when the game stops: the session's average and 1% / 0.1% lows (the
+/// frame rate of the slowest 1% and 0.1% of frames), whatever the switches.
+void LogRunSummary() {
+    const RunFrames& run = Run();
+    if (run.frames == 0 || run.sum_ms <= 0.0) {
+        return;
+    }
+    const auto fps = [](double ms) { return ms > 0.0 ? 1000.0 / ms : 0.0; };
+    LOG_INFO(Render_Vulkan,
+             "Nx2Summary run: {:.0f} s, {} frames, average {:.1f} fps, 1% low {:.1f} fps, 0.1% low "
+             "{:.1f} fps, {} frames over 100 ms, longest {:.0f} ms",
+             run.sum_ms / 1000.0, run.frames, fps(run.sum_ms / static_cast<double>(run.frames)),
+             fps(run.Slowest(0.01)), fps(run.Slowest(0.001)), run.over_100ms, run.longest_ms);
+    Run() = RunFrames{}; // the next game starts over
+}
+
 /// "Nx2Summary perf:" every 10 s (GPU thread, at each present): what a report needs to judge the
 /// frame rate and the image without other switches.
 void LogPerfSummary(Scheduler& scheduler, const VideoCore::DlssStatus& dlss, u64 generated) {
@@ -240,6 +293,7 @@ void LogPerfSummary(Scheduler& scheduler, const VideoCore::DlssStatus& dlss, u64
     const Clock::time_point now = Clock::now();
     if (last != Clock::time_point{}) {
         intervals.push_back(std::chrono::duration<float, std::milli>(now - last).count());
+        Run().Add(intervals.back());
     } else {
         start = now;
         dlss_evaluations = dlss.evaluations;
@@ -374,9 +428,25 @@ try
 #endif
 {
 
-    if (Settings::values.renderer_force_max_clock.GetValue() && device.ShouldBoostClocks()) {
-        turbo_mode.emplace(instance, dld);
-        scheduler.RegisterOnSubmit([this] { turbo_mode->QueueSubmitted(); });
+    // Force maximum clocks (off by default): a second device keeps the GPU busy. Its device
+    // failing to start skips it instead of failing the whole renderer ("Vulkan initialization
+    // error" and no boot). Fritchii a813290651.
+    if (!Settings::values.renderer_force_max_clock.GetValue()) {
+        LOG_INFO(Render_Vulkan, "Force maximum clocks: off");
+    } else if (!device.ShouldBoostClocks()) {
+        LOG_INFO(Render_Vulkan, "Force maximum clocks: skipped (driver not on the list, Steam "
+                                "Deck, or a debugging tool attached)");
+    } else {
+        try {
+            turbo_mode.emplace(instance, dld);
+            scheduler.RegisterOnSubmit([this] { turbo_mode->QueueSubmitted(); });
+            LOG_INFO(Render_Vulkan, "Force maximum clocks: running (costs power; not for laptops "
+                                    "on battery)");
+        } catch (const std::exception& exception) {
+            turbo_mode.reset();
+            LOG_WARNING(Render_Vulkan, "Force maximum clocks: skipped (its device failed: {})",
+                        exception.what());
+        }
     }
 
 #ifdef HAS_RESHADE
@@ -425,6 +495,7 @@ try
 }
 
 RendererVulkan::~RendererVulkan() {
+    LogRunSummary();
     scheduler.RegisterOnSubmit([] {});
     void(device.GetLogical().WaitIdle());
 }

@@ -676,8 +676,8 @@ struct System::Impl {
                      "Duskbloods variants: stack lowering {}, host-timing wait {}, upload stale {}, "
                      "GPU-only regions {}, totals {} remote memory, AOFFI gather {}, "
                      "host-timing priority {}, compute write mark {}, compute size word {}, ribbon {}, "
-                     "back cuts {} [{}], loaded-pointer loads {}, list-fed grid macros reverted "
-                     "(#1651)",
+                     "back cuts {} [{}], loaded-pointer loads {}, report reads wait {}, collector "
+                     "GPU waits {}, list-fed grid macros reverted (#1651)",
                      env("EDEN_NX2_DUSK_STACK") == "upstream" ? "upstream (#1490)" : "v25 (fold)",
                      flag("EDEN_NX2_HOSTTIMING_SPIN", true) ? "spin (v2.5)" : "OS sleep (#1016)",
                      env("EDEN_NX2_UPLOAD_STALE").empty() || env("EDEN_NX2_UPLOAD_STALE")[0] == '1'
@@ -701,7 +701,12 @@ struct System::Impl {
                      back_off == 0 ? "upstream (#1586, #1585, #1095)"
                                    : "old (pre-#1586, pre-#1585, pre-#1095) where =old",
                      VideoCommon::BackX::DuskPiecesText(back_off),
-                     flag("EDEN_NX2_DUSK_LOADED_REBASE", true) ? "rebased" : "routed");
+                     flag("EDEN_NX2_DUSK_LOADED_REBASE", true) ? "rebased" : "routed",
+                     env("EDEN_NX2_LEAN_REPORT_WAIT") == "verify"
+                         ? "for their reports, verified"
+                         : (flag("EDEN_NX2_LEAN_REPORT_WAIT", true) ? "for their reports (#559)"
+                                                                    : "for all GPU work"),
+                     flag("EDEN_NX2_TC_ONE_WAIT", true) ? "one a frame" : "unlimited");
         }
 
         // Track launch time for frontend launches

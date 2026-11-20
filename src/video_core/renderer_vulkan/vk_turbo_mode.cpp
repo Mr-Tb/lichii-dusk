@@ -8,6 +8,7 @@
 #endif
 
 #include "common/literals.h"
+#include "common/logging.h"
 #include "video_core/host_shaders/vulkan_turbo_mode_comp_spv.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
@@ -27,7 +28,14 @@ TurboMode::TurboMode(const vk::Instance& instance, const vk::InstanceDispatch& d
         std::scoped_lock lk{m_submission_lock};
         m_submission_time = std::chrono::steady_clock::now();
     }
-    m_thread = std::jthread([&](auto stop_token) { Run(stop_token); });
+    // A failure on its thread (setup or a lost device) stops the boost, not the emulator.
+    m_thread = std::jthread([&](auto stop_token) {
+        try {
+            Run(stop_token);
+        } catch (const std::exception& exception) {
+            LOG_WARNING(Render_Vulkan, "Force maximum clocks stopped: {}", exception.what());
+        }
+    });
 }
 
 TurboMode::~TurboMode() = default;

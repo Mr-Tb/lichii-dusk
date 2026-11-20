@@ -225,8 +225,19 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
     }();
     const bool keep_written =
         keep_written_switch && !out_of_memory && commit_bound && host_commit_room >= 1_GiB;
+    // At most one download with a whole-GPU wait per frame (Fritchii EXP57): a pass that downloads
+    // image after image stalls the GPU thread for each. The rest wait for later frames, unless an
+    // image could not be made. On for The Duskbloods; EDEN_NX2_TC_ONE_WAIT=1/0 forces it.
+    static const bool one_wait_switch = [] {
+        const char* const value = std::getenv("EDEN_NX2_TC_ONE_WAIT");
+        if (value != nullptr && value[0] != '\0') {
+            return value[0] != '0';
+        }
+        return Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL;
+    }();
+    const bool one_wait = one_wait_switch && !out_of_memory;
     const auto CanEvict = [this, &high_priority_mode, &aggressive_mode, &evict_old_costly,
-                           &evict_bad_overlaps, keep_written](ImageId image_id,
+                           &evict_bad_overlaps, keep_written, one_wait](ImageId image_id,
                                                 bool* out_must_download = nullptr) {
         const auto& image = slot_images[image_id];
         if (True(image.flags & ImageFlagBits::IsDecoding) ||
@@ -246,6 +257,10 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
         if (must_download && keep_written &&
             frame_tick - lru_cache.Tick(image.lru_index) < MinEvictionAge) {
             ++gc_kept_written;
+            return false;
+        }
+        if (must_download && one_wait && gc_waited_frame == frame_tick) {
+            ++gc_downloads_deferred;
             return false;
         }
         return true;
@@ -272,6 +287,7 @@ void TextureCache<P>::RunGarbageCollector(bool out_of_memory) {
         const bool covered =
             overlap_writeback && OverlapHasNewerData(image_id, image, keep, &keep_ticks);
         if (must_download) {
+            gc_waited_frame = frame_tick;
             auto map = runtime.DownloadStagingBuffer(image.unswizzled_size_bytes);
             const auto copies = FullDownloadCopies(image.info);
             image.DownloadMemory(map, copies);
@@ -1632,9 +1648,9 @@ void TextureCache<P>::TickFrame() {
         if constexpr (requires { runtime.LogMemoryStatistics(); }) {
             runtime.LogMemoryStatistics();
         }
-        LOG_INFO(HW_GPU, "Texture cache last 600 frames: created {} images, deleted {} (collector {}, {} costly, {} downloaded, {} written kept), {} async decodes, ASTC {} opaque / {} alpha",
+        LOG_INFO(HW_GPU, "Texture cache last 600 frames: created {} images, deleted {} (collector {}, {} costly, {} downloaded, {} written kept, {} downloads deferred), {} async decodes, ASTC {} opaque / {} alpha",
                  images_created, images_deleted, gc_deletes + gc_costly_deletes, gc_costly_deletes,
-                 gc_download_deletes, gc_kept_written,
+                 gc_download_deletes, gc_kept_written, gc_downloads_deferred,
                  async_decodes_queued, astc_opaque_images, astc_alpha_images);
         LOG_INFO(HW_GPU, "Texture cache last 600 frames: {} uploads from guest memory, {} MiB (largest {} MiB, {} by layer)",
                  images_uploaded, uploaded_bytes >> 20, largest_upload >> 20, layer_uploads);
@@ -1660,7 +1676,7 @@ void TextureCache<P>::TickFrame() {
         // The per-image and per-shape tallies only feed debug lines: skip them while those are off.
         debug_stats = Common::Log::IsLevelEnabled(Common::Log::Class::HW_GPU, Common::Log::Level::Debug);
         gc_deletes = gc_costly_deletes = gc_download_deletes = gc_kept_written =
-            async_decodes_queued = 0;
+            gc_downloads_deferred = async_decodes_queued = 0;
         images_created = images_deleted = 0;
     }
     // An image that could not be made at all: the driver is out of memory whatever the counts

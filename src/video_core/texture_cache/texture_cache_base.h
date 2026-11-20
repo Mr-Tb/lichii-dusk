@@ -171,6 +171,8 @@ class TextureCache : public VideoCommon::ChannelSetupCaches<TextureCacheChannelI
     u64 gc_costly_deletes{};
     u64 gc_download_deletes{}; ///< Evictions that downloaded the image first (a full GPU wait)
     u64 gc_kept_written{};     ///< GPU-written images kept while host commit bounds the cache
+    u64 gc_downloads_deferred{}; ///< Downloads left for a later frame (one GPU wait a frame)
+    u64 gc_waited_frame{~0ULL};  ///< The frame of the collector's last download wait
     u64 async_decodes_queued{};
     u64 images_created{};
     u64 images_uploaded{};   ///< Image contents uploaded from guest memory (last 600 frames)

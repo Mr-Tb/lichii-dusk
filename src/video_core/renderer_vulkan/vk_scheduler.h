@@ -680,6 +680,17 @@ private:
     void PassPresent();
     void ReadPassSample();
 
+    /// Under submit_mutex: how long a submission waited for it (Present holds it across
+    /// vkQueuePresentKHR, so a blocked present delays the next submission). Logged every 10 s.
+    void NoteSubmitLockWait(std::chrono::steady_clock::duration waited);
+    struct SubmitLockStats {
+        std::chrono::steady_clock::time_point window{};
+        u64 submits{};
+        u64 waited{};
+        double wait_ms{};
+        double max_ms{};
+    } submit_lock_stats;
+
     VideoCommon::QueryCacheBase<QueryCacheParams>* query_cache = nullptr;
 
     vk::CommandBuffer current_cmdbuf;

@@ -28,6 +28,7 @@
 #include "video_core/query_cache/query_base.h"
 #include "video_core/query_cache/query_cache_base.h"
 #include "video_core/query_cache/query_stream.h"
+#include "video_core/query_cache/report_slots.h"
 #include "video_core/query_cache/types.h"
 
 namespace VideoCommon {
@@ -351,6 +352,8 @@ void QueryCacheBase<Traits>::CounterReport(GPUVAddr addr, QueryType counter_type
             if (op.noted) {
                 impl->rasterizer.FinishReport(op_cpu_addr, op_report_size);
             }
+            // Written or discarded: FlushQueryResults' lean wait stops waiting for it.
+            VideoCommon::ReportSlots::Complete(op_cpu_addr);
         };
         if (True(query_base->flags & QueryFlagBits::IsInvalidated)) {
             if (const u64 trace = QueryTrace::Sample(QueryTrace::Event::Discard)) {
@@ -424,6 +427,7 @@ void QueryCacheBase<Traits>::CounterReport(GPUVAddr addr, QueryType counter_type
                   "the report operation must fit MSVC's std::function storage");
     std::function<void()> operation(operation_body);
     if (is_fence) {
+        VideoCommon::ReportSlots::Issue(cpu_addr);
         VideoCore::g_signaling_query_report_fence = !is_synced;
         impl->rasterizer.SignalFence(std::move(operation));
         VideoCore::g_signaling_query_report_fence = false;
@@ -462,6 +466,7 @@ void QueryCacheBase<Traits>::CounterReport(GPUVAddr addr, QueryType counter_type
             streamer->Free(new_query_id);
             return;
         }
+        VideoCommon::ReportSlots::Issue(cpu_addr);
         impl->rasterizer.SyncOperation(std::move(operation));
     }
     auto [cont_addr, base] = gen_caching_indexing(cpu_addr);
