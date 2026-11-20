@@ -15,7 +15,7 @@
 <summary><b>English: open the guide</b></summary>
 
 **This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, newest upstream after build 341), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs.**
-It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.5.0) is included in the zip.
+It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.3.2) is included in the zip.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
 
@@ -25,7 +25,7 @@ It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by
 - **Much faster lighting:** the game's lighting shader, the heaviest part of each frame, now reads its light data directly instead of searching every buffer for it. Our own fix, for every GPU. At 2x on an RTX 3060: **30.4 → 39.4 fps**.
 - **Shorter GPU waits:** the texture cache writes back at most one GPU-drawn image per frame with a full GPU wait; the rest wait a frame. **39.5 → 43.3 fps** in game, better 1% lows, and less texture churn when memory runs low.
 - **Online fix** for the newer upstream base: its IPv6 connections now reach the launcher's servers (error 2321-4992 otherwise).
-- **Launcher playDB-CNT 1.5.0** with the new **Mods** tab: Bot Match and CPU player names are checkboxes there (on by default); the other mods are experimental.
+- **Launcher playDB-CNT 1.3.2** included. On 2026-11-20 the zip went back from launcher 1.5.0 to 1.3.2, because Windows Defender flagged the zip.
 - **For bug reports:** when the game closes, the log ends with an `Nx2Summary run` line (average fps, 1% and 0.1% lows), and the GPU's busy share is logged once a second.
 
 ## Performance
@@ -67,7 +67,7 @@ AMD and Intel cards use FSR 3.1: same guidance, a bit softer. Avoid 2x on mid-ra
 | Performance | Faster storage-buffer range lookups, clean buffer-sync skipping, a sleeping (not spinning) GPU front thread |
 | v2: upstream build 117 | The game's neural-network (HMMA) shaders run on the GPU's matrix units, NaN-safe float math, and 100+ other upstream fixes |
 | v3: upstream build 177 | FSR 3.1 in place of the game's DLSS pass, optional NVIDIA DLSS with live switching, fixes for the save freeze (2153-0002), crackling sound, Bot Match crashes, hub laser lines and flicker, and pixelated HUD above 1x |
-| v4: newest upstream | Direct light-data reads in the lighting shader (+30% fps at 2x), one waited texture write-back per frame (+10%), the IPv6 online fix, launcher 1.5.0 |
+| v4: newest upstream | Direct light-data reads in the lighting shader (+30% fps at 2x), one waited texture write-back per frame (+10%), the IPv6 online fix |
 
 **Tested on:** an **NVIDIA RTX 3060** GPU with an **Intel Core i5-12400F** CPU. Other NVIDIA GPUs should behave the same; AMD and Intel GPUs are untested. Use a current GPU driver.
 
@@ -98,14 +98,13 @@ Steps:
 
 ## Launcher setup
 
-`Play.Duskbloods.exe` (playDB-CNT 1.5.0) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
+`Play.Duskbloods.exe` (playDB-CNT 1.3.2) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
 
 1. Run `Play.Duskbloods.exe`.
 2. **Setup tab > Game:** press **Folder** and pick the unpacked `THE DUSKBLOODS NETWORK TEST VER` folder (the one with `base\exefs\main`), or **Browse** for a `.nup` file. It must say *The Duskbloods network test found*. A game folder in or next to the Lichii folder is found automatically.
 3. **Setup tab > Emulator:** choose `Lichii - <folder name>` (this `lichii.exe`; it is selected automatically when the launcher sits next to it). No red *No Duskbloods online support* note may show. Do not press any **Patch** button: this build has the online support built in.
 4. **Online tab:** keep **Just me** (the default). **Host a room** and **Join a room** are online tests with friends, and their matches do not start yet.
-5. **Mods tab:** **Bot Match** (a full Dusk Battle against 7 CPU players, in Battle Remembrance > Tutorials) and **CPU player names** are on by default. The other mods are experimental: untick them for normal play.
-6. Press **Start game** and keep the launcher open while you play.
+5. Press **Start game** and keep the launcher open while you play.
 
 *Just me* needs no firewall change: everything stays on 127.0.0.1. To host or join a room, allow the launcher and `lichii.exe` through Windows Firewall when Windows asks.
 
@@ -139,8 +138,7 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
 - Brightness flicker or texture pop-in can appear when the PC runs low on memory (RAM plus page file). Close browsers and other heavy programs before playing.
 - The first launch stutters while shaders rebuild for the new version.
 - AMD and Intel GPUs are untested.
-- Some Windows antivirus programs flagged launcher 1.4.0 by mistake; 1.5.0 is built the same way. If yours flags it, restore it from quarantine or get it from [the launcher's releases](https://github.com/sikoGD/playDB-CNT/releases).
-- The launcher's experimental mods (NT Unlocks, Burning Forest Exploration, courtyard training targets) are not tested with this build.
+- Some Windows antivirus programs flagged launchers 1.4.0 and 1.5.0 by mistake, so the zip ships 1.3.2. If yours flags it, restore it from quarantine or get it from [the launcher's releases](https://github.com/sikoGD/playDB-CNT/releases).
 - DLSS needs an RTX card and a one-time download of NVIDIA's files.
 
 ## Troubleshooting
@@ -185,7 +183,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 <div dir="rtl">
 
 **هذا المشروع نسخة معدّلة (fork) من [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2، أحدث نسخة بعد الإصدار 341)، ومحسّنة لتشغيل *The Duskbloods Network Test* (رقم البرنامج `0400D1D02399A000`) على أجهزة Windows.**
-يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.5.0) موجود داخل الملف المضغوط.
+يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.3.2) موجود داخل الملف المضغوط.
 
 > المشروع غير تابع لـ Nintendo أو FromSoftware أو المشاريع الأصلية. لا يتضمن أي ألعاب أو مفاتيح أو firmware. استخدم فقط ملفات استخرجتها بنفسك بطريقة قانونية.
 
@@ -195,7 +193,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - **إضاءة أسرع بكثير:** الـ shader الخاص بالإضاءة، وهو أثقل جزء في كل إطار، صار يقرأ بيانات الأضواء مباشرة بدل البحث عنها في كل ذاكرة مربوطة. هذا إصلاحنا الخاص ويفيد كل كروت الشاشة. على RTX 3060 بدقة 2x: **من 30.4 إلى 39.4 إطار/ثانية**.
 - **انتظار أقل لكرت الشاشة:** ذاكرة الصور تعيد كتابة صورة واحدة على الأكثر في كل إطار مع انتظار كامل لكرت الشاشة، والباقي ينتظر الإطار التالي. **من 39.5 إلى 43.3 إطار/ثانية** داخل اللعب، وأدنى إطارات (1% low) أفضل، وتبديل أقل للصور عندما تقلّ الذاكرة.
 - **إصلاح الاتصال** للنسخة الأصلية الجديدة: اتصالات IPv6 صارت تصل إلى خوادم المشغّل (وإلا يظهر الخطأ 2321-4992).
-- **مشغّل playDB-CNT الإصدار 1.5.0** مع تبويب **Mods** الجديد: Bot Match وأسماء اللاعبين الآليين صارت خيارات هناك (مفعّلة افتراضيًا)، وباقي الإضافات تجريبية.
+- **مشغّل playDB-CNT الإصدار 1.3.2** مرفق. في 2026-11-20 أعدنا المشغّل في الملف المضغوط من 1.5.0 إلى 1.3.2، لأن Windows Defender صنّف الملف المضغوط كتهديد.
 - **لتقارير المشاكل:** عند إغلاق اللعبة ينتهي السجلّ بسطر `Nx2Summary run` (متوسط الإطارات وأدنى 1% و0.1%)، ونسبة انشغال كرت الشاشة تُسجَّل كل ثانية.
 
 ## الأداء
@@ -237,7 +235,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 | الأداء | بحث أسرع في نطاقات الذاكرة، تجاوز مزامنة البيانات غير المتغيّرة، وخيط GPU أمامي ينام بدل الانشغال بالانتظار |
 | الإصدار الثاني: تحديث 117 | shaders الشبكة العصبية (HMMA) في اللعبة تعمل على وحدات المصفوفات في كرت الشاشة، حسابات أدق مع قيم NaN، وأكثر من 100 إصلاح آخر من المشروع الأصلي |
 | الإصدار الثالث: تحديث 177 | FSR 3.1 بدل مرحلة DLSS الخاصة باللعبة، و NVIDIA DLSS اختياري مع التبديل المباشر، وإصلاح تجمّد الحفظ (2153-0002) وطقطقة الصوت وانهيار Bot Match وخطوط الليزر والوميض في الـ hub وتكسّر الواجهة فوق 1x |
-| الإصدار الرابع: أحدث نسخة أصلية | قراءة بيانات الأضواء مباشرة في shader الإضاءة (+30% إطارات بدقة 2x)، إعادة كتابة صورة واحدة مع انتظار في كل إطار (+10%)، إصلاح اتصال IPv6، والمشغّل 1.5.0 |
+| الإصدار الرابع: أحدث نسخة أصلية | قراءة بيانات الأضواء مباشرة في shader الإضاءة (+30% إطارات بدقة 2x)، إعادة كتابة صورة واحدة مع انتظار في كل إطار (+10%)، وإصلاح اتصال IPv6 |
 
 **تمّت التجربة على:** كرت شاشة **NVIDIA RTX 3060** مع معالج **Intel Core i5-12400F**. يُفترض أن تعمل كروت NVIDIA الأخرى بنفس الطريقة، أما كروت AMD وIntel فلم تُجرَّب. استخدم أحدث تعريف لكرت الشاشة.
 
@@ -268,14 +266,13 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 
 ## إعداد المشغّل
 
-المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.5.0) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
+المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.3.2) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
 
 1. شغّل `Play.Duskbloods.exe`.
 2. **تبويب Setup > Game:** اضغط **Folder** واختر مجلد اللعبة `THE DUSKBLOODS NETWORK TEST VER` (الذي يحتوي على `base\exefs\main`)، أو اضغط **Browse** لاختيار ملف `.nup`. يجب أن تظهر العبارة *The Duskbloods network test found*. إذا كان مجلد اللعبة داخل مجلد Lichii أو بجانبه، يجده المشغّل تلقائيًا.
 3. **تبويب Setup > Emulator:** اختر `Lichii - <اسم المجلد>` (أي `lichii.exe` هذا، ويُختار تلقائيًا إذا كان المشغّل بجانبه). يجب ألّا تظهر الملاحظة الحمراء *No Duskbloods online support*. لا تضغط أي زر **Patch**، فهذه النسخة تدعم الاتصال أصلًا.
 4. **تبويب Online:** اترك **Just me** (الخيار الافتراضي). أما **Host a room** و**Join a room** فهما لتجارب اللعب مع الأصدقاء، والمباريات فيهما لا تبدأ بعد.
-5. **تبويب Mods:** الخياران **Bot Match** (مباراة Dusk Battle كاملة ضد 7 لاعبين آليين، في Battle Remembrance > Tutorials) و**CPU player names** مفعّلان افتراضيًا. باقي الإضافات تجريبية، فألغِ تفعيلها في اللعب العادي.
-6. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
+5. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
 
 وضع *Just me* لا يحتاج أي تغيير في جدار الحماية (Firewall)، فكل شيء يبقى على 127.0.0.1. لاستضافة غرفة أو الانضمام إليها، اسمح للمشغّل ولـ `lichii.exe` بالمرور عبر جدار حماية Windows عندما يطلب Windows ذلك.
 
@@ -309,8 +306,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - قد يظهر وميض في الإضاءة أو ظهور متأخر للصور عندما تقلّ ذاكرة الجهاز (الرام مع ملف الصفحات). أغلق المتصفحات والبرامج الثقيلة قبل اللعب.
 - أول تشغيل فيه تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
 - كروت AMD وIntel لم تُجرَّب.
-- بعض برامج الحماية في Windows صنّفت المشغّل 1.4.0 كتهديد بالخطأ، والإصدار 1.5.0 مبني بنفس الطريقة. إذا حجزه برنامج الحماية لديك، استرجعه من الحجر أو حمّله من [إصدارات المشغّل](https://github.com/sikoGD/playDB-CNT/releases).
-- الإضافات التجريبية في المشغّل (NT Unlocks وBurning Forest Exploration وأهداف التدريب في الساحة) لم تُجرَّب مع هذه النسخة.
+- بعض برامج الحماية في Windows صنّفت المشغّلين 1.4.0 و1.5.0 كتهديد بالخطأ، لذلك يأتي الملف المضغوط مع 1.3.2. إذا حجزه برنامج الحماية لديك، استرجعه من الحجر أو حمّله من [إصدارات المشغّل](https://github.com/sikoGD/playDB-CNT/releases).
 - DLSS يحتاج كرت RTX وتحميل ملفات NVIDIA مرة واحدة.
 
 ## حل المشاكل
