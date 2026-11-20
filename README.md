@@ -14,53 +14,66 @@
 <details name="lang">
 <summary><b>English: open the guide</b></summary>
 
-**This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, build 177), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs with an NVIDIA GPU and an Intel CPU.**
-It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.3.2) is included in the zip.
+**This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, newest upstream after build 341), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs.**
+It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.5.0) is included in the zip.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
 
-## What's new in v3
+## What's new in v4
 
-- **Rebased on zortos293/Lichii build 177** (v2 was build 117).
-- **Sharper image with AMD FSR 3.1:** the game's own DLSS pass is replaced by FSR 3.1, fed with the game's real depth, motion vectors and jitter. The image is sharp and stable instead of blocky or blurry. Based on Siko's v30 work (see [Credits](#credits-and-license)).
-- **Optional NVIDIA DLSS** for RTX cards (real DLSS through NVIDIA Streamline), with Auto, DLAA, Quality, Balanced, Performance and Ultra Performance modes. Switch live in game between FSR 3.1 and the DLSS modes. FSR 3.1 stays the automatic fallback. See [NVIDIA DLSS](#nvidia-dlss-optional).
-- **Fixes:**
-  - the freeze / error 2153-0002 when the game saves
-  - distorted, crackling sound
-  - Bot Match crashes (the game's heap ran out)
-  - red "laser" lines and brightness flicker in the hub
-  - jagged, pixelated HUD and text when the internal resolution is above 1x (the window downscale now averages pixels)
-- **Launcher playDB-CNT 1.3.2** included; offline mode works. On 2026-11-17 the zip went back from launcher 1.4.0 to 1.3.2, because Windows antivirus flagged 1.4.0 on some PCs.
+- **Rebased on the newest zortos293/Lichii nx2** (after build 341; v3 was build 177): hundreds of upstream fixes, and fewer shader freezes (a draw whose shader is still building waits at most 8 ms, then shows a frame later).
+- **Much faster lighting:** the game's lighting shader, the heaviest part of each frame, now reads its light data directly instead of searching every buffer for it. Our own fix, for every GPU. At 2x on an RTX 3060: **30.4 → 39.4 fps**.
+- **Shorter GPU waits:** the texture cache writes back at most one GPU-drawn image per frame with a full GPU wait; the rest wait a frame. **39.5 → 43.3 fps** in game, better 1% lows, and less texture churn when memory runs low.
+- **Online fix** for the newer upstream base: its IPv6 connections now reach the launcher's servers (error 2321-4992 otherwise).
+- **Launcher playDB-CNT 1.5.0** with the new **Mods** tab: Bot Match and CPU player names are checkboxes there (on by default); the other mods are experimental.
+- **For bug reports:** when the game closes, the log ends with an `Nx2Summary run` line (average fps, 1% and 0.1% lows), and the GPU's busy share is logged once a second.
 
 ## Performance
 
-Measured by the maintainer in actual play:
+Measured by the maintainer in actual play (hub, heaviest area and matches):
 
 | | |
 |---|---|
 | CPU | Intel Core i5-12400F |
-| GPU | NVIDIA GeForce RTX 3060 (12 GB), driver 616.56 |
+| GPU | NVIDIA GeForce RTX 3060 (12 GB) |
 | RAM | 16 GB |
-| Match median, v3 with FSR 3.1 | **~46.7 fps** (40.7 fps on the previous build) |
-| Average | **~50 fps** |
-| Peak | **~60 fps** |
-| Heaviest area | **36+ fps** (13-16 fps before this fork's optimizations) |
+| v4 at **2x**, DLSS Quality | **~43 fps** in game (1% low ~22 fps) |
+| Same PC and settings before v4's fixes | ~30 fps |
+| v3 at 1x with FSR 3.1 (for reference) | ~47 fps match median |
+
+At 2x the GPU is the limit (busy ~90% of each frame), so a stronger GPU helps directly.
+
+## Resolution and upscaling (pick by monitor)
+
+The **Resolution** setting decides quality and fps; the DLSS mode barely does, so keep DLSS on **Quality**. The game itself draws a 1108x624 picture: the resolution setting multiplies it, then FSR 3.1 or DLSS upscales it to your screen.
+
+| Monitor | Resolution | Renders | Upscale to screen | GPU cost vs 1x | Use when |
+|---|---|---|---|---|---|
+| 1080p | 1x | 1108x624 | 1.73x | 1x | Weaker GPUs (RTX 3050/2060 class), laptops |
+| 1080p | **1.5x (recommended)** | 1662x936 | 1.15x | ~2.25x | RTX 3060 class and up |
+| 1080p | 2x | 2216x1248 | scaled down | 4x | Strong GPUs; small gain over 1.5x |
+| 1440p | 1x | 1108x624 | 2.31x | 1x | Weak GPUs (soft image) |
+| 1440p | **1.5x (recommended)** | 1662x936 | 1.54x | ~2.25x | RTX 3060 class |
+| 1440p | 2x | 2216x1248 | 1.15x | 4x | RTX 4070 / 5070 Ti class and up |
+
+AMD and Intel cards use FSR 3.1: same guidance, a bit softer. Avoid 2x on mid-range cards.
 
 ## What this fork changes
 
 | Area | Fix |
 |---|---|
-| Online check | Works with the playDB-CNT launcher: host redirect, loopback-only networking, the launcher's CA in the game's trust store, a BCAT file-name check (error 2122-0001) |
+| Online check | Works with the playDB-CNT launcher: host redirect (IPv4 and IPv6), loopback-only networking, the launcher's CA in the game's trust store, a BCAT file-name check (error 2122-0001) |
 | Rendering | TAA black stripes (native stack spills), the fog volume turning white/NaN (per-layer 3D clears), white waves at the bottom of the screen (NN-upscaler arena clear), two missing Ampere shader instructions |
-| Performance | Faster storage-buffer range lookups, clean buffer-sync skipping, and a sleeping (not spinning) GPU front thread |
+| Performance | Faster storage-buffer range lookups, clean buffer-sync skipping, a sleeping (not spinning) GPU front thread |
 | v2: upstream build 117 | The game's neural-network (HMMA) shaders run on the GPU's matrix units, NaN-safe float math, and 100+ other upstream fixes |
 | v3: upstream build 177 | FSR 3.1 in place of the game's DLSS pass, optional NVIDIA DLSS with live switching, fixes for the save freeze (2153-0002), crackling sound, Bot Match crashes, hub laser lines and flicker, and pixelated HUD above 1x |
+| v4: newest upstream | Direct light-data reads in the lighting shader (+30% fps at 2x), one waited texture write-back per frame (+10%), the IPv6 online fix, launcher 1.5.0 |
 
 **Tested on:** an **NVIDIA RTX 3060** GPU with an **Intel Core i5-12400F** CPU. Other NVIDIA GPUs should behave the same; AMD and Intel GPUs are untested. Use a current GPU driver.
 
 ## Download
 
-**[Download v3 (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v3)**
+**[Download v4 (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v4)**
 
 Older builds: [all releases](https://github.com/Mr-Tb/lichii-dusk/releases).
 
@@ -81,17 +94,18 @@ Steps:
 4. **Launcher:** set it up as described in [Launcher setup](#launcher-setup) below.
 5. **Play:** press **Start game** in `Play.Duskbloods.exe`. Always start the game through the launcher: started any other way, the game has no servers and stops at an online connection message.
 
-The first minutes stutter while shaders compile; this improves with each session.
+**Updating from v3:** extract v4 into a new folder and copy your old `user` folder over it (keys, firmware, saves). The first minutes stutter while shaders rebuild for the new version.
 
 ## Launcher setup
 
-`Play.Duskbloods.exe` (playDB-CNT 1.3.2) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
+`Play.Duskbloods.exe` (playDB-CNT 1.5.0) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
 
 1. Run `Play.Duskbloods.exe`.
 2. **Setup tab > Game:** press **Folder** and pick the unpacked `THE DUSKBLOODS NETWORK TEST VER` folder (the one with `base\exefs\main`), or **Browse** for a `.nup` file. It must say *The Duskbloods network test found*. A game folder in or next to the Lichii folder is found automatically.
 3. **Setup tab > Emulator:** choose `Lichii - <folder name>` (this `lichii.exe`; it is selected automatically when the launcher sits next to it). No red *No Duskbloods online support* note may show. Do not press any **Patch** button: this build has the online support built in.
 4. **Online tab:** keep **Just me** (the default). **Host a room** and **Join a room** are online tests with friends, and their matches do not start yet.
-5. Press **Start game** and keep the launcher open while you play.
+5. **Mods tab:** **Bot Match** (a full Dusk Battle against 7 CPU players, in Battle Remembrance > Tutorials) and **CPU player names** are on by default. The other mods are experimental: untick them for normal play.
+6. Press **Start game** and keep the launcher open while you play.
 
 *Just me* needs no firewall change: everything stays on 127.0.0.1. To host or join a room, allow the launcher and `lichii.exe` through Windows Firewall when Windows asks.
 
@@ -101,7 +115,7 @@ For NVIDIA RTX cards only. Without it, the emulator uses AMD FSR 3.1, which work
 
 1. **Get NVIDIA's files** (not included in the zip): open **Emulation > Configure > Graphics**, tick **NVIDIA DLSS** and press **Download from NVIDIA** in its panel. Or copy `sl.interposer.dll`, `sl.common.dll`, `sl.dlss.dll` and `nvngx_dlss.dll` from the NVIDIA Streamline SDK 2.14.16 into `user\streamline\`.
 2. **Turn it on:** tick **NVIDIA DLSS** and restart the emulator once. The first time, DLSS starts with the next launch.
-3. **Switch live:** in game, click the upscaler button in the status bar (or press **F7**) to cycle between FSR3 and the DLSS modes: Auto, Quality, Balanced, Performance, Ultra Performance. Right-click the button to pick one(I recommend Quality with Nvidia's Default model preset).
+3. **Switch live:** in game, click the upscaler button in the status bar (or press **F7**) to cycle between FSR3 and the DLSS modes: Auto, Quality, Balanced, Performance, Ultra Performance. Right-click the button to pick one. **Quality** is recommended; set sharpness with the resolution (see above).
 
 If DLSS cannot start, the emulator falls back to FSR 3.1.
 
@@ -109,7 +123,7 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
 
 | Setting | Value | Why |
 |---|---|---|
-| Graphics > Resolution | **1x** | The tested setting |
+| Graphics > Resolution | **1x** | Runs on the most PCs; raise it with the table above |
 | Graphics > Anti-aliasing | **None** | FSR 3.1 / DLSS already handle it |
 | Graphics > Advanced > GPU Mode | **Fast** | Big CPU saving |
 | Extras > Asynchronous shader compilation | **On** | Fewer shader stutters |
@@ -122,9 +136,11 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
 
 ## Known issues
 
-- Flickering on low-FPS devices at some higher resolutions.
+- Brightness flicker or texture pop-in can appear when the PC runs low on memory (RAM plus page file). Close browsers and other heavy programs before playing.
 - The first launch stutters while shaders rebuild for the new version.
 - AMD and Intel GPUs are untested.
+- Some Windows antivirus programs flagged launcher 1.4.0 by mistake; 1.5.0 is built the same way. If yours flags it, restore it from quarantine or get it from [the launcher's releases](https://github.com/sikoGD/playDB-CNT/releases).
+- The launcher's experimental mods (NT Unlocks, Burning Forest Exploration, courtyard training targets) are not tested with this build.
 - DLSS needs an RTX card and a one-time download of NVIDIA's files.
 
 ## Troubleshooting
@@ -137,23 +153,28 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
   5. Look for red lines in the launcher's log: missing keys, *Port 18443 is still in use*, or *No Duskbloods online support*.
   6. Edited `launcher_settings.json` by hand? Delete it (it is next to `Play.Duskbloods.exe`) and choose the game and emulator again in the window. A broken file is ignored without a warning.
   7. Still stuck: press **Open logs** in the launcher and send the newest folder in `user\duskbloods_test\runs\` (`emulator.log`, `server.log`, `frontdoor.log`).
+- **Error 2321-4992 at the title screen:** the launcher is starting an older Lichii or another emulator. Pick this build's `lichii.exe` in the Setup tab.
 - **Stuck on "checking save data" or network errors:** start through `Play.Duskbloods.exe`, not `lichii.exe` directly.
 - **Error 2153-0513 at boot:** a save got corrupted, e.g. by force-closing during a save. Move the game's save folder under `user\nand\user\save\` aside and start again.
 - **Black screen after loading:** close and relaunch. A rare hang has been seen once.
 - **Black screen on first boot after updating:** delete the shader cache in `user\cache\shader\`.
 - **Flickering or broken geometry:** delete the line `EDEN_NX2_FRAMES_AHEAD=1` in `nx2_switches.txt` and restart.
+- **Lights look wrong (black, flashing or missing):** remove the `#` before `EDEN_NX2_DUSK_LOADED_REBASE=0` in `nx2_switches.txt` (the old, slower light loading) and report it.
 - **No DLSS option or button:** it needs an RTX GPU and the four NVIDIA files in `user\streamline\`.
 - **Missing DLL errors:** extract the whole zip. Do not run `lichii.exe` from inside the archive.
+- **Reporting a problem:** close the game, then send `user\log\eden_log.txt` (check it for anything private first).
 
 ## Building from source
 
-Branch [`dusk-v3r`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v3r) (v2: [`dusk-v2`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v2), v1: [`dusk-frizti`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-frizti)). Build with MSYS2 UCRT64 + clang, exactly as upstream Lichii.
+Branch [`dusk-v4`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v4) (v3: [`dusk-v3r`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v3r), v2: [`dusk-v2`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v2), v1: [`dusk-frizti`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-frizti)). Build with MSYS2 UCRT64 + clang, exactly as upstream Lichii.
 
 ## Credits and license
 
 Built on [zortos293/Lichii](https://github.com/zortos293/Lichii), [Frizti/Lichii](https://github.com/Frizti/Lichii). The launcher and network-test servers are [playDB-CNT](https://github.com/sikoGD/playDB-CNT) by sikoGD. Licensed under GPL-3.0-or-later (see [LICENSE.txt](LICENSE.txt)). NVIDIA DLSS runs through NVIDIA Streamline (MIT license); NVIDIA's files are downloaded by the user, not shipped.
 
 Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher. This release owes a lot to his Duskbloods build v30 and its follow-ups. From his work we took how to feed the game's real inputs to the temporal upscaler: the motion-vector scale and jitter conventions, tracking the game's depth and velocity render targets, and keeping the upscaler history when the render region changes size. That is the basis of the sharp FSR 3.1 image. His v32 also pointed the way to the save-freeze (2153-0002) fix, and its pause logging is ported here.
+
+v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-waited-write-back cap, the run summary and the Force maximum clocks guard) and from an open upstream pull request, [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (report reads that wait only for their own reports). Thanks to JalenJaceX2 for PR #2.
 
 </details>
 
@@ -163,55 +184,66 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 
 <div dir="rtl">
 
-**هذا المشروع نسخة معدّلة (fork) من [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2، الإصدار 177)، ومحسّنة لتشغيل *The Duskbloods Network Test* (رقم البرنامج `0400D1D02399A000`) على أجهزة Windows بكرت شاشة NVIDIA ومعالج Intel.**
-يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.3.2) موجود داخل الملف المضغوط.
+**هذا المشروع نسخة معدّلة (fork) من [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2، أحدث نسخة بعد الإصدار 341)، ومحسّنة لتشغيل *The Duskbloods Network Test* (رقم البرنامج `0400D1D02399A000`) على أجهزة Windows.**
+يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.5.0) موجود داخل الملف المضغوط.
 
 > المشروع غير تابع لـ Nintendo أو FromSoftware أو المشاريع الأصلية. لا يتضمن أي ألعاب أو مفاتيح أو firmware. استخدم فقط ملفات استخرجتها بنفسك بطريقة قانونية.
 
-## الجديد في الإصدار الثالث
+## الجديد في الإصدار الرابع
 
-- **مبني على الإصدار 177 من zortos293/Lichii** (الإصدار الثاني كان مبنيًا على 117).
-- **صورة أوضح مع AMD FSR 3.1:** استبدلنا مرحلة DLSS الخاصة باللعبة بـ FSR 3.1، ويستقبل العمق ومتجهات الحركة والـ jitter الحقيقية من اللعبة. النتيجة صورة حادّة وثابتة بدل الصورة المربّعة أو الضبابية. مبني على عمل Siko في نسخته v30 (راجع [الشكر](#الشكر-والترخيص)).
-- **NVIDIA DLSS اختياري** لكروت RTX (DLSS حقيقي عبر NVIDIA Streamline)، بأوضاع Auto وDLAA وQuality وBalanced وPerformance وUltra Performance. يمكنك التبديل بين FSR 3.1 وأوضاع DLSS أثناء اللعب مباشرة، ويبقى FSR 3.1 هو البديل التلقائي. راجع قسم [NVIDIA DLSS](#nvidia-dlss-اختياري).
-- **إصلاحات:**
-  - التجمّد / الخطأ 2153-0002 عند حفظ اللعبة
-  - الصوت المشوّه والمتقطّع (طقطقة)
-  - انهيار اللعبة في Bot Match (نفاد ذاكرة اللعبة)
-  - الخطوط الحمراء ("الليزر") ووميض الإضاءة في الـ hub
-  - تشوّه وتكسّر الواجهة والنصوص عند رفع الدقة الداخلية فوق 1x (تصغير الصورة للنافذة يأخذ الآن متوسط البكسلات)
-- **مشغّل playDB-CNT الإصدار 1.3.2** مرفق، ووضع اللعب دون اتصال (offline) يعمل. في 2026-11-17 أعدنا المشغّل في الملف المضغوط من 1.4.0 إلى 1.3.2، لأن برامج الحماية في Windows صنّفت 1.4.0 كتهديد على بعض الأجهزة.
+- **مبني على أحدث نسخة nx2 من zortos293/Lichii** (بعد الإصدار 341، والإصدار الثالث كان مبنيًا على 177): مئات الإصلاحات من المشروع الأصلي، وتجمّد أقل أثناء تجهيز الـ shaders (الرسم الذي لم يجهز الـ shader الخاص به ينتظر 8 ميلي ثانية كحد أقصى، ثم يظهر بعد إطار واحد).
+- **إضاءة أسرع بكثير:** الـ shader الخاص بالإضاءة، وهو أثقل جزء في كل إطار، صار يقرأ بيانات الأضواء مباشرة بدل البحث عنها في كل ذاكرة مربوطة. هذا إصلاحنا الخاص ويفيد كل كروت الشاشة. على RTX 3060 بدقة 2x: **من 30.4 إلى 39.4 إطار/ثانية**.
+- **انتظار أقل لكرت الشاشة:** ذاكرة الصور تعيد كتابة صورة واحدة على الأكثر في كل إطار مع انتظار كامل لكرت الشاشة، والباقي ينتظر الإطار التالي. **من 39.5 إلى 43.3 إطار/ثانية** داخل اللعب، وأدنى إطارات (1% low) أفضل، وتبديل أقل للصور عندما تقلّ الذاكرة.
+- **إصلاح الاتصال** للنسخة الأصلية الجديدة: اتصالات IPv6 صارت تصل إلى خوادم المشغّل (وإلا يظهر الخطأ 2321-4992).
+- **مشغّل playDB-CNT الإصدار 1.5.0** مع تبويب **Mods** الجديد: Bot Match وأسماء اللاعبين الآليين صارت خيارات هناك (مفعّلة افتراضيًا)، وباقي الإضافات تجريبية.
+- **لتقارير المشاكل:** عند إغلاق اللعبة ينتهي السجلّ بسطر `Nx2Summary run` (متوسط الإطارات وأدنى 1% و0.1%)، ونسبة انشغال كرت الشاشة تُسجَّل كل ثانية.
 
 ## الأداء
 
-قياسات صاحب المشروع أثناء اللعب الفعلي:
+قياسات صاحب المشروع أثناء اللعب الفعلي (الـ hub وأثقل منطقة والمباريات):
 
 | | |
 |---|---|
 | المعالج | Intel Core i5-12400F |
-| كرت الشاشة | NVIDIA GeForce RTX 3060 (12 GB)، تعريف 616.56 |
+| كرت الشاشة | NVIDIA GeForce RTX 3060 (12 GB) |
 | الذاكرة | 16 GB |
-| الوسيط داخل المباريات، الإصدار الثالث مع FSR 3.1 | **حوالي 46.7 إطار/ثانية** (40.7 في الإصدار السابق) |
-| المتوسط | **حوالي 50 إطار/ثانية** |
-| الأعلى | **حوالي 60 إطار/ثانية** |
-| أثقل منطقة | **أكثر من 36 إطار/ثانية** (كانت 13-16 قبل تحسينات هذه النسخة) |
+| الإصدار الرابع بدقة **2x** مع DLSS Quality | **حوالي 43 إطار/ثانية** داخل اللعب (أدنى 1% حوالي 22) |
+| نفس الجهاز والإعدادات قبل إصلاحات الإصدار الرابع | حوالي 30 إطار/ثانية |
+| الإصدار الثالث بدقة 1x مع FSR 3.1 (للمقارنة) | حوالي 47 إطار/ثانية وسيط المباريات |
 
-لم نقِس أداء NVIDIA DLSS بعد. المحاكي في هذه اللعبة يعتمد على المعالج أكثر من كرت الشاشة، لذلك يفيد المعالج الأسرع أكثر من كرت شاشة أقوى.
+بدقة 2x يكون كرت الشاشة هو الحدّ (مشغول حوالي 90% من كل إطار)، لذلك كرت أقوى يرفع الأداء مباشرة.
+
+## الدقة ورفع الدقة (اختر حسب شاشتك)
+
+إعداد **Resolution** هو الذي يحدد الجودة والأداء، أما وضع DLSS فتأثيره بسيط، لذلك اترك DLSS على **Quality**. اللعبة نفسها ترسم صورة بحجم 1108x624، وإعداد الدقة يضاعفها، ثم يرفعها FSR 3.1 أو DLSS إلى حجم شاشتك.
+
+| الشاشة | الدقة | حجم الرسم | الرفع إلى الشاشة | تكلفة كرت الشاشة مقارنة بـ 1x | متى تستخدمها |
+|---|---|---|---|---|---|
+| 1080p | 1x | 1108x624 | 1.73x | 1x | كروت أضعف (فئة RTX 3050/2060) واللابتوبات |
+| 1080p | **1.5x (مقترح)** | 1662x936 | 1.15x | حوالي 2.25x | فئة RTX 3060 وأعلى |
+| 1080p | 2x | 2216x1248 | تصغير | 4x | كروت قوية، والفرق عن 1.5x بسيط |
+| 1440p | 1x | 1108x624 | 2.31x | 1x | كروت ضعيفة (صورة ناعمة) |
+| 1440p | **1.5x (مقترح)** | 1662x936 | 1.54x | حوالي 2.25x | فئة RTX 3060 |
+| 1440p | 2x | 2216x1248 | 1.15x | 4x | فئة RTX 4070 / 5070 Ti وأعلى |
+
+كروت AMD وIntel تستخدم FSR 3.1: نفس الإرشادات مع صورة أنعم قليلًا. تجنّب 2x على الكروت المتوسطة.
 
 ## ما الذي تغيّر في هذه النسخة
 
 | المجال | الإصلاح |
 |---|---|
-| فحص الاتصال | يعمل مع مشغّل playDB-CNT: إعادة توجيه الخوادم، شبكة محلية فقط، إضافة شهادة المشغّل إلى شهادات اللعبة الموثوقة، وإصلاح خطأ BCAT ‏(2122-0001) |
+| فحص الاتصال | يعمل مع مشغّل playDB-CNT: إعادة توجيه الخوادم (IPv4 وIPv6)، شبكة محلية فقط، إضافة شهادة المشغّل إلى شهادات اللعبة الموثوقة، وإصلاح خطأ BCAT ‏(2122-0001) |
 | الرسوميات | الخطوط السوداء (TAA)، الضباب الذي يتحوّل للأبيض، الموجات البيضاء أسفل الشاشة، وتعليمتان مفقودتان في shaders ‏Ampere |
 | الأداء | بحث أسرع في نطاقات الذاكرة، تجاوز مزامنة البيانات غير المتغيّرة، وخيط GPU أمامي ينام بدل الانشغال بالانتظار |
 | الإصدار الثاني: تحديث 117 | shaders الشبكة العصبية (HMMA) في اللعبة تعمل على وحدات المصفوفات في كرت الشاشة، حسابات أدق مع قيم NaN، وأكثر من 100 إصلاح آخر من المشروع الأصلي |
 | الإصدار الثالث: تحديث 177 | FSR 3.1 بدل مرحلة DLSS الخاصة باللعبة، و NVIDIA DLSS اختياري مع التبديل المباشر، وإصلاح تجمّد الحفظ (2153-0002) وطقطقة الصوت وانهيار Bot Match وخطوط الليزر والوميض في الـ hub وتكسّر الواجهة فوق 1x |
+| الإصدار الرابع: أحدث نسخة أصلية | قراءة بيانات الأضواء مباشرة في shader الإضاءة (+30% إطارات بدقة 2x)، إعادة كتابة صورة واحدة مع انتظار في كل إطار (+10%)، إصلاح اتصال IPv6، والمشغّل 1.5.0 |
 
 **تمّت التجربة على:** كرت شاشة **NVIDIA RTX 3060** مع معالج **Intel Core i5-12400F**. يُفترض أن تعمل كروت NVIDIA الأخرى بنفس الطريقة، أما كروت AMD وIntel فلم تُجرَّب. استخدم أحدث تعريف لكرت الشاشة.
 
 ## التحميل
 
-**[حمّل الإصدار الثالث (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v3)**
+**[حمّل الإصدار الرابع (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v4)**
 
 الإصدارات الأقدم: [كل الإصدارات](https://github.com/Mr-Tb/lichii-dusk/releases).
 
@@ -232,17 +264,18 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 4. **المشغّل:** جهّزه كما في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل.
 5. **اللعب:** اضغط **Start game** في `Play.Duskbloods.exe`. شغّل اللعبة دائمًا من المشغّل، فإذا شغّلتها بأي طريقة أخرى لن تجد أي خوادم، وستتوقف عند رسالة تطلب الاتصال بالإنترنت.
 
-في الدقائق الأولى قد يحدث تقطيع بسيط أثناء تجهيز الـ shaders، ويتحسّن ذلك مع كل جلسة.
+**التحديث من الإصدار الثالث:** فكّ ضغط الإصدار الرابع في مجلد جديد، ثم انسخ مجلد `user` القديم فوقه (المفاتيح والـ firmware وملفات الحفظ). في الدقائق الأولى قد يحدث تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
 
 ## إعداد المشغّل
 
-المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.3.2) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
+المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.5.0) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
 
 1. شغّل `Play.Duskbloods.exe`.
 2. **تبويب Setup > Game:** اضغط **Folder** واختر مجلد اللعبة `THE DUSKBLOODS NETWORK TEST VER` (الذي يحتوي على `base\exefs\main`)، أو اضغط **Browse** لاختيار ملف `.nup`. يجب أن تظهر العبارة *The Duskbloods network test found*. إذا كان مجلد اللعبة داخل مجلد Lichii أو بجانبه، يجده المشغّل تلقائيًا.
 3. **تبويب Setup > Emulator:** اختر `Lichii - <اسم المجلد>` (أي `lichii.exe` هذا، ويُختار تلقائيًا إذا كان المشغّل بجانبه). يجب ألّا تظهر الملاحظة الحمراء *No Duskbloods online support*. لا تضغط أي زر **Patch**، فهذه النسخة تدعم الاتصال أصلًا.
 4. **تبويب Online:** اترك **Just me** (الخيار الافتراضي). أما **Host a room** و**Join a room** فهما لتجارب اللعب مع الأصدقاء، والمباريات فيهما لا تبدأ بعد.
-5. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
+5. **تبويب Mods:** الخياران **Bot Match** (مباراة Dusk Battle كاملة ضد 7 لاعبين آليين، في Battle Remembrance > Tutorials) و**CPU player names** مفعّلان افتراضيًا. باقي الإضافات تجريبية، فألغِ تفعيلها في اللعب العادي.
+6. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
 
 وضع *Just me* لا يحتاج أي تغيير في جدار الحماية (Firewall)، فكل شيء يبقى على 127.0.0.1. لاستضافة غرفة أو الانضمام إليها، اسمح للمشغّل ولـ `lichii.exe` بالمرور عبر جدار حماية Windows عندما يطلب Windows ذلك.
 
@@ -252,7 +285,7 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 
 1. **حمّل ملفات NVIDIA** (غير موجودة في الملف المضغوط): افتح **Emulation > Configure > Graphics**، فعّل **NVIDIA DLSS** واضغط **Download from NVIDIA** في اللوحة الخاصة به. أو انسخ بنفسك الملفات `sl.interposer.dll` و`sl.common.dll` و`sl.dlss.dll` و`nvngx_dlss.dll` من NVIDIA Streamline SDK 2.14.16 إلى المجلد `user\streamline\`.
 2. **فعّله:** ضع علامة على **NVIDIA DLSS** وأعد تشغيل المحاكي مرة واحدة. في المرة الأولى يبدأ DLSS مع التشغيل التالي.
-3. **بدّل أثناء اللعب:** اضغط زر الـ upscaler في شريط الحالة أسفل النافذة (أو **F7**) للتنقّل بين FSR3 وأوضاع DLSS: Auto وDLAA وQuality وBalanced وPerformance وUltra Performance. اضغط بالزر الأيمن لاختيار وضع معيّن.
+3. **بدّل أثناء اللعب:** اضغط زر الـ upscaler في شريط الحالة أسفل النافذة (أو **F7**) للتنقّل بين FSR3 وأوضاع DLSS: Auto وQuality وBalanced وPerformance وUltra Performance. اضغط بالزر الأيمن لاختيار وضع معيّن. ننصح بـ **Quality**، وحدّد وضوح الصورة من إعداد الدقة (راجع الأعلى).
 
 إذا لم يستطع DLSS العمل، يعود المحاكي تلقائيًا إلى FSR 3.1.
 
@@ -260,7 +293,7 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 
 | الإعداد | القيمة | السبب |
 |---|---|---|
-| Graphics > Resolution | **1x** | الإعداد الذي تمّت تجربته |
+| Graphics > Resolution | **1x** | يعمل على أكبر عدد من الأجهزة، وارفعه حسب الجدول أعلاه |
 | Graphics > Anti-aliasing | **None** | FSR 3.1 أو DLSS يتكفّلان بذلك |
 | Graphics > Advanced > GPU Mode | **Fast** | توفير كبير في استهلاك المعالج |
 | Extras > Asynchronous shader compilation | **On** | تقطيع أقل |
@@ -273,9 +306,11 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
 
 ## مشاكل معروفة
 
-- وميض على الأجهزة ذات معدل الإطارات المنخفض عند بعض الدقّات العالية.
+- قد يظهر وميض في الإضاءة أو ظهور متأخر للصور عندما تقلّ ذاكرة الجهاز (الرام مع ملف الصفحات). أغلق المتصفحات والبرامج الثقيلة قبل اللعب.
 - أول تشغيل فيه تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
 - كروت AMD وIntel لم تُجرَّب.
+- بعض برامج الحماية في Windows صنّفت المشغّل 1.4.0 كتهديد بالخطأ، والإصدار 1.5.0 مبني بنفس الطريقة. إذا حجزه برنامج الحماية لديك، استرجعه من الحجر أو حمّله من [إصدارات المشغّل](https://github.com/sikoGD/playDB-CNT/releases).
+- الإضافات التجريبية في المشغّل (NT Unlocks وBurning Forest Exploration وأهداف التدريب في الساحة) لم تُجرَّب مع هذه النسخة.
 - DLSS يحتاج كرت RTX وتحميل ملفات NVIDIA مرة واحدة.
 
 ## حل المشاكل
@@ -288,23 +323,28 @@ Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the 
   5. ابحث عن أسطر حمراء في سجلّ المشغّل: مفاتيح ناقصة، أو *Port 18443 is still in use*، أو *No Duskbloods online support*.
   6. عدّلت `launcher_settings.json` يدويًا؟ احذفه (هو بجانب `Play.Duskbloods.exe`) واختر اللعبة والمحاكي من جديد في النافذة، فالمشغّل يتجاهل الملف التالف دون أي تنبيه.
   7. ما زالت المشكلة قائمة؟ اضغط **Open logs** في المشغّل وأرسل أحدث مجلد داخل `user\duskbloods_test\runs\` (`emulator.log` و`server.log` و`frontdoor.log`).
+- **الخطأ 2321-4992 عند شاشة البداية:** المشغّل يشغّل نسخة Lichii أقدم أو محاكيًا آخر. اختر `lichii.exe` الخاص بهذه النسخة في تبويب Setup.
 - **التوقف عند "checking save data" أو أخطاء الشبكة:** شغّل اللعبة من `Play.Duskbloods.exe` وليس من `lichii.exe` مباشرة.
 - **الخطأ 2153-0513 عند التشغيل:** ملف الحفظ تلف، مثلًا بسبب إغلاق اللعبة بالقوة أثناء الحفظ. انقل مجلد حفظ اللعبة داخل `user\nand\user\save\` إلى مكان آخر وأعد التشغيل.
 - **شاشة سوداء بعد التحميل:** أغلق اللعبة وأعد تشغيلها (حدث تعليق نادر مرة واحدة).
 - **شاشة سوداء أول تشغيل بعد التحديث:** احذف ذاكرة الـ shaders في `user\cache\shader\`.
 - **وميض أو أشكال مشوّهة:** احذف السطر `EDEN_NX2_FRAMES_AHEAD=1` من الملف `nx2_switches.txt` ثم أعد تشغيل المحاكي.
+- **الإضاءة تبدو خاطئة (سوداء أو تومض أو مفقودة):** احذف علامة `#` قبل السطر `EDEN_NX2_DUSK_LOADED_REBASE=0` في الملف `nx2_switches.txt` (طريقة تحميل الأضواء القديمة الأبطأ)، وأخبرنا بالمشكلة.
 - **لا يظهر خيار أو زر DLSS:** يحتاج كرت RTX والملفات الأربعة من NVIDIA داخل `user\streamline\`.
 - **رسائل عن ملفات DLL مفقودة:** فكّ الضغط عن الملف كاملًا، ولا تشغّل `lichii.exe` من داخل الملف المضغوط.
+- **للإبلاغ عن مشكلة:** أغلق اللعبة، ثم أرسل الملف `user\log\eden_log.txt` (تأكد أولًا أنه لا يحتوي على شيء خاص).
 
 ## البناء من الكود المصدري
 
-الفرع [`dusk-v3r`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v3r) (الإصدار الثاني: [`dusk-v2`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v2)، الإصدار الأول: [`dusk-frizti`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-frizti)). يُبنى باستخدام MSYS2 UCRT64 + clang مثل Lichii الأصلي تمامًا.
+الفرع [`dusk-v4`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v4) (الإصدار الثالث: [`dusk-v3r`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v3r)، الإصدار الثاني: [`dusk-v2`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v2)، الإصدار الأول: [`dusk-frizti`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-frizti)). يُبنى باستخدام MSYS2 UCRT64 + clang مثل Lichii الأصلي تمامًا.
 
 ## الشكر والترخيص
 
 مبني على [zortos293/Lichii](https://github.com/zortos293/Lichii) و[Frizti/Lichii](https://github.com/Frizti/Lichii). المشغّل وخوادم الشبكة من [playDB-CNT](https://github.com/sikoGD/playDB-CNT) لـ sikoGD. الترخيص: GPL-3.0-or-later (راجع [LICENSE.txt](LICENSE.txt)). يعمل NVIDIA DLSS عبر NVIDIA Streamline (ترخيص MIT)، وملفات NVIDIA يحمّلها المستخدم بنفسه ولا تُوزَّع مع المحاكي.
 
 شكر خاص لـ **Siko** ‏([sikoGD](https://github.com/sikoGD))، صاحب المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT). هذا الإصدار مدين كثيرًا لنسخته v30 من Duskbloods ولتحديثيها v31 وv32. أخذنا من عمله طريقة تمرير مدخلات اللعبة الحقيقية إلى أداة رفع الدقة الزمنية (temporal upscaler): مقياس متجهات الحركة واصطلاحات الـ jitter، وتتبّع أهداف الرسم الخاصة بالعمق والسرعة في اللعبة، والاحتفاظ بسجلّ أداة رفع الدقة عندما يتغيّر حجم منطقة الرسم. هذا هو أساس صورة FSR 3.1 الحادّة. كما أرشدتنا نسخته v32 إلى طريق إصلاح تجمّد الحفظ (2153-0002)، ونقلنا منها تسجيل فترات التوقّف.
+
+يستخدم الإصدار الرابع أيضًا أفكارًا من [Fritchii](https://github.com/Frizti/Fritchii) (حدّ إعادة الكتابة مع الانتظار، وملخّص الجلسة، وحماية خيار Force maximum clocks)، ومن طلب دمج مفتوح في المشروع الأصلي، [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (قراءة نتائج الاستعلامات مع انتظار نتائجها فقط). شكرًا لـ JalenJaceX2 على طلب الدمج رقم 2.
 
 </div>
 
