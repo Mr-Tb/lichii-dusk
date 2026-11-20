@@ -109,13 +109,17 @@ std::shared_ptr<const Config> Get() {
     return current_config;
 }
 
+constexpr std::array<u8, 12> v4_mapped{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
+
+bool IsV4Mapped(const SockAddrIn& address) {
+    return address.family == Domain::INET6 &&
+           std::equal(v4_mapped.begin(), v4_mapped.end(), address.ip6.begin());
+}
+
 bool IsLoopback(const SockAddrIn& address) {
     if (address.family == Domain::INET6) {
         static constexpr IPv6Address loopback{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1};
-        static constexpr std::array<u8, 12> v4_mapped{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
-        return address.ip6 == loopback ||
-               (std::equal(v4_mapped.begin(), v4_mapped.end(), address.ip6.begin()) &&
-                address.ip6[12] == 127);
+        return address.ip6 == loopback || (IsV4Mapped(address) && address.ip6[12] == 127);
     }
     return address.ip[0] == 127;
 }
@@ -226,11 +230,23 @@ std::optional<std::vector<AddrInfo>> Resolve(std::string_view host,
 
 SockAddrIn ConnectTarget(const SockAddrIn& address) {
     const auto config = Get();
-    if (!config->server || address.ip != IPv4Address{127, 0, 0, 1} || address.portno != 443) {
+    // An INET6 socket (with IPV6_V6ONLY cleared) reaches 127.0.0.1 as ::ffff:127.0.0.1.
+    const bool mapped = IsV4Mapped(address);
+    const IPv4Address ip =
+        mapped ? IPv4Address{address.ip6[12], address.ip6[13], address.ip6[14], address.ip6[15]}
+               : address.ip;
+    if (!config->server || (address.family != Domain::INET && !mapped) ||
+        ip != IPv4Address{127, 0, 0, 1} || address.portno != 443) {
         return address;
     }
-    LOG_DEBUG(Network, "Host redirect: 127.0.0.1:443 -> {}", SockAddrToString(*config->server));
-    return *config->server;
+    SockAddrIn target = *config->server;
+    if (mapped && target.family == Domain::INET) {
+        target.family = Domain::INET6;
+        std::ranges::copy(v4_mapped, target.ip6.begin());
+        std::ranges::copy(target.ip, target.ip6.begin() + 12);
+    }
+    LOG_DEBUG(Network, "Host redirect: 127.0.0.1:443 -> {}", SockAddrToString(target));
+    return target;
 }
 
 bool Allowed(const SockAddrIn& address) {
