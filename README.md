@@ -11,7 +11,7 @@
 <p align="center"><b>Choose your language / اختر اللغة</b></p>
 
 <a id="english"></a>
-<details name="lang">
+<details name="lang" open>
 <summary><b>English: open the guide</b></summary>
 
 **This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, newest upstream after build 341), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs.**
