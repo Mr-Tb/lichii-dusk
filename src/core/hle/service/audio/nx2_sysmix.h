@@ -33,13 +33,6 @@ struct SysmixOutputCounters {
     u64 faults{};
 };
 
-/// The output timer's catch-up state (timer callback only), shown in the status line.
-struct SysmixCatchUp {
-    u32 owed{};        ///< Ticks missed by late or contended wakes, still to pump.
-    u64 dropped{};     ///< Owed ticks over the cap, dropped since the last status line.
-    s64 max_late_us{}; ///< Largest timer lateness since the last status line.
-};
-
 class SysmixOutput {
 public:
     SysmixOutput(Core::System& system, Kernel::KProcess& process, AudioCore::Sink::Sink& sink,
@@ -58,12 +51,7 @@ public:
     Result SetGain(f32 gain, s64 ramp_ns);
     f32 GetGain() const;
     u32 GetState() const;
-    /// Moves at most one block between the host and the guest ring; true when it moved one.
-    bool Pump(SysmixCatchUp* catch_up = nullptr);
-    /// sysmix_ahead (ahead): lets the host queue hold more blocks and moves one more whole block
-    /// while it has room; true when it moved one. Without it the host queue limit returns to its
-    /// minimum.
-    bool PumpAhead(bool ahead);
+    void Pump();
     Kernel::KReadableEvent* GetStateEvent();
     Kernel::KReadableEvent* GetDataEvent();
     SysmixOutputCounters GetCounters() const;

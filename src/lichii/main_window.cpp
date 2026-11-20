@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+// SPDX-FileCopyrightText: Copyright 2026 citron Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
 // Static Qt on macOS doesn't use Vulkan
 // Other platforms do, and thus have conflicting VulkanMemoryAllocator symbols
 #include "core/launch_params.h"
@@ -48,6 +51,7 @@
 #include "lichii/recommended_settings_dialog.h"
 #include "lichii/shader_warm_dialog.h"
 #include "lichii/whats_new_dialog.h"
+#include "lichii/bug_report_dialog.h"
 #include "video_core/shader_warm/shader_warm_builder.h"
 #ifdef LICHII_NX_TOOLS
 #include "core/file_sys/registered_cache.h"
@@ -63,6 +67,7 @@
 
 #include "configuration/configure_dialog.h"
 #include "configuration/configure_input.h"
+#include "configuration/configure_network.h"
 #include "configuration/configure_per_game.h"
 #include "configuration/configure_tas.h"
 
@@ -90,6 +95,7 @@
 #include <QFileInfo>
 #include <QFutureWatcher>
 #include <QGuiApplication>
+#include <QImage>
 #include <QInputDialog>
 #include <QMimeData>
 #include <QPalette>
@@ -106,6 +112,7 @@
 // Qt Common //
 #include "qt_common/config/shared_translation.h"
 #include "qt_common/config/uisettings.h"
+#include "qt_common/game_list/game_list_p.h"
 
 #include "qt_common/abstract/frontend.h"
 
@@ -114,6 +121,7 @@
 
 #include "qt_common/util/content.h"
 #include "qt_common/util/fs.h"
+#include "qt_common/util/game.h"
 #include "qt_common/util/meta.h"
 #include "qt_common/util/mod.h"
 #include "qt_common/util/path.h"
@@ -146,6 +154,7 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 #include "common/logging.h"
 #include "common/memory_detect.h"
 #include "common/nextendo.h"
+#include "common/npln_patch_catalog.h"
 #include "common/scm_rev.h"
 #include "common/scope_exit.h"
 #include "common/string_util.h"
@@ -160,9 +169,11 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 #include "core/frontend/applets/software_keyboard.h"
 
 #include "core/hle/kernel/k_process.h"
+#include "core/hle/service/acc/nextendo_id_token.h"
 #include "core/hle/service/acc/profile_manager.h"
 #include "core/hle/service/am/applet_manager.h"
 #include "core/hle/service/am/frontend/applet_web_browser_types.h"
+#include "core/hle/service/bcat/backend/nextendo.h"
 
 #include "core/file_sys/card_image.h"
 #include "core/file_sys/common_funcs.h"
@@ -194,6 +205,11 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 
 #include <SDL3/SDL.h>
 
+#include <atomic>
+#include <chrono>
+#include <cstdlib>
+#include <mutex>
+#include <thread>
 #include <boost/container/flat_set.hpp>
 
 // Platform stuff //
@@ -341,7 +357,7 @@ constexpr int default_mouse_hide_timeout = 2500;
 constexpr int default_input_update_timeout = 1;
 constexpr int EmuThreadStopTimeoutMs = 10'000;
 // A teardown that keeps making progress (Common::ShutdownProgress) is waited for this long at
-// most before its thread is terminated.
+// most before Lichii gives up on it and exits.
 constexpr qint64 MaxEmuThreadShutdownMs = 180'000;
 
 constexpr size_t CopyBufferSize = 1_MiB;
@@ -439,6 +455,48 @@ bool UpscalerAllowed(std::optional<DlssQuality> choice) {
     return UpscalerEnv() != "dlss" || choice.has_value();
 }
 
+// After citron-nextendo's NextendoController::ApplyProfileName and WriteProfileAvatar. False when
+// the picture couldn't be saved.
+bool WriteNextendoProfile(Service::Account::ProfileManager& manager, const Common::UUID& user,
+                          const Common::Nextendo::ProfilePull& pull) {
+    Service::Account::ProfileBase profile{};
+    if (!manager.GetProfileBase(user, profile)) {
+        return true;
+    }
+    const auto username = reinterpret_cast<const char*>(profile.username.data());
+    const std::string nickname =
+        Common::Nextendo::ProfileNickname(pull.nickname, profile.username.size());
+    if (!nickname.empty() && nickname != Common::StringFromFixedZeroTerminatedBuffer(
+                                             username, profile.username.size())) {
+        profile.username.fill(0);
+        std::ranges::copy(nickname, profile.username.begin());
+        manager.SetProfileBase(user, profile);
+        manager.WriteUserSaveFile();
+        LOG_INFO(Frontend, "Took the Nextendo nickname for the current user");
+    }
+    if (!pull.avatar) {
+        return true;
+    }
+    QImage image;
+    if (!image.loadFromData(reinterpret_cast<const uchar*>(pull.avatar->data()),
+                            static_cast<int>(pull.avatar->size()))) {
+        LOG_WARNING(Frontend, "nextendo.network sent a profile picture Lichii can't read");
+        return true;
+    }
+    constexpr int size = 256;
+    image = image.scaled(size, size, Qt::KeepAspectRatioByExpanding, Qt::SmoothTransformation);
+    image = image.copy((image.width() - size) / 2, (image.height() - size) / 2, size, size);
+    const auto path = QString::fromStdString(Common::FS::PathToUTF8String(
+        Common::FS::GetEdenPath(Common::FS::EdenPath::NANDDir) /
+        fmt::format("system/save/8000000000000010/su/avators/{}.jpg", user.FormattedString())));
+    if (!QDir{}.mkpath(QFileInfo{path}.absolutePath()) || !image.save(path, "JPEG", 100)) {
+        LOG_WARNING(Frontend, "Could not save the Nextendo profile picture");
+        return false;
+    }
+    LOG_INFO(Frontend, "Took the Nextendo profile picture for the current user");
+    return true;
+}
+
 } // namespace
 
 #ifndef _WIN32
@@ -524,27 +582,98 @@ MainWindow::MainWindow(bool has_broken_vulkan)
     show();
 
 #ifdef ENABLE_UPDATE_CHECKER
+    connect(&update_watcher, &QFutureWatcher<UpdateChecker::CheckResult>::finished, this,
+            &MainWindow::OnEmulatorUpdateAvailable);
     if (UISettings::values.check_for_updates) {
-        update_future = QtConcurrent::run([]() { return UpdateChecker::Check(); });
-        update_watcher.connect(&update_watcher, &QFutureWatcher<QString>::finished, this,
-                               &MainWindow::OnEmulatorUpdateAvailable);
-        update_watcher.setFuture(update_future);
+        CheckForUpdates(false);
     }
 #endif
 
-    if constexpr (Common::Nextendo::OnlinePlayAvailable) {
-        connect(&nextendo_session_watcher, &QFutureWatcher<bool>::finished, this, [this] {
-            if (nextendo_session_watcher.result()) {
+    connect(&nextendo_session_watcher,
+            &QFutureWatcher<Common::Nextendo::SignOutReason>::finished, this, [this] {
+                QString why;
+                switch (nextendo_session_watcher.result()) {
+                case Common::Nextendo::SignOutReason::None:
+                    return;
+                case Common::Nextendo::SignOutReason::SessionExpired:
+                    why = tr("Your Nextendo session expired, so Lichii signed you out.");
+                    break;
+                case Common::Nextendo::SignOutReason::SessionRevoked:
+                    why = tr("Your session was ended on nextendo.network, so Lichii signed you "
+                             "out.");
+                    break;
+                case Common::Nextendo::SignOutReason::MissingScope:
+                    why = tr("Your Nextendo sign-in didn't allow online play, so Lichii signed "
+                             "you out.");
+                    break;
+                }
                 QMessageBox::warning(this, tr("Signed out of Nextendo"),
-                                     tr("Your session was ended on nextendo.network, so Lichii "
-                                        "signed you out. Sign in again in Configure > Network."));
-            }
-        });
-        connect(&nextendo_session_timer, &QTimer::timeout, this,
-                &MainWindow::KeepNextendoSessionAlive);
-        nextendo_session_timer.start(std::chrono::minutes{2});
-        KeepNextendoSessionAlive();
-    }
+                                     why + QLatin1Char(' ') +
+                                         tr("Sign in again in Configure > Network."));
+            });
+    connect(&nextendo_status_watcher,
+            &QFutureWatcher<std::optional<Common::Nextendo::OnlineStatus>>::finished, this, [this] {
+                // A reply for the user before a profile switch isn't this user's, and the check
+                // a game booted on the new profile meanwhile waited for this one.
+                if (nextendo_status_profile !=
+                    Service::Account::Nextendo::CurrentProfile(*QtCommon::system)) {
+                    CheckNextendoOnlineStatus();
+                    return;
+                }
+                const auto status = nextendo_status_watcher.result();
+                QString message;
+                if (!Common::Nextendo::LoadAccount(nextendo_status_profile)) {
+                    message = tr("Nextendo online play is on, but you aren't signed in. Sign in "
+                                 "in Configure > Network.");
+                } else if (status && !status->allow) {
+                    LOG_WARNING(Frontend, "nextendo.network refuses online play: {}",
+                                status->reason);
+                    message = ConfigureNetwork::OnlineRefusal(status->reason);
+                }
+                if (!message.isEmpty()) {
+                    statusBar()->showMessage(message, 30000);
+                }
+            });
+    connect(&nextendo_catalog_watcher,
+            &QFutureWatcher<std::optional<Common::Nextendo::GameCatalog>>::finished, this, [this] {
+                const auto catalog = nextendo_catalog_watcher.result();
+                const auto check = std::exchange(nextendo_version_check, std::nullopt);
+                if (!catalog || !check) {
+                    return;
+                }
+                const auto verdict =
+                    Common::Nextendo::CheckGameVersion(*catalog, check->first, check->second);
+                if (!verdict || verdict->kind == Common::Nextendo::VersionVerdict::Kind::Accepted) {
+                    return;
+                }
+                statusBar()->showMessage(
+                    verdict->kind == Common::Nextendo::VersionVerdict::Kind::Disabled
+                        ? tr("Nextendo doesn't offer online play for this game right now.")
+                        : tr("This version of the game can't play online on Nextendo. Update it "
+                             "to %1.")
+                              .arg(QString::fromStdString(verdict->recommended)),
+                    30000);
+            });
+    connect(&nextendo_session_timer, &QTimer::timeout, this, &MainWindow::KeepNextendoSessionAlive);
+    connect(&nextendo_social_timer, &QTimer::timeout, this, &MainWindow::UpdateNextendoSocial);
+    connect(&nextendo_profile_watcher,
+            &QFutureWatcher<std::optional<Common::Nextendo::ProfilePull>>::finished, this, [this] {
+                const auto pull = nextendo_profile_watcher.result();
+                // Asked for while this pull ran, for another user or a new sign-in.
+                const bool pending = nextendo_profile_force;
+                if (pull && Common::Nextendo::OnlinePlayActive() &&
+                    Settings::values.nextendo_sync_profile.GetValue()) {
+                    // A game that booted meanwhile reads the profile: write it once the game stops.
+                    if (QtCommon::system->IsPoweredOn() ||
+                        !WriteNextendoProfile(QtCommon::system->GetProfileManager(),
+                                              nextendo_profile_user, *pull)) {
+                        nextendo_profile_force = true;
+                    }
+                }
+                if (pending) {
+                    SyncNextendoProfile(false);
+                }
+            });
 
     // Setup content providers.
     QtCommon::SetupContentProviders();
@@ -626,6 +755,7 @@ MainWindow::MainWindow(bool has_broken_vulkan)
     // to prevent the UI from blowing up.
     UpdateUITheme();
 
+    std::optional<Core::LaunchParams> launch;
     if (QStringList args = QApplication::arguments(); args.size() >= 2) {
         QList<QByteArray> qba{};
         for (auto const& e : args)
@@ -634,7 +764,55 @@ MainWindow::MainWindow(bool has_broken_vulkan)
         for (auto& e : qba)
             args_cstr.push_back(e.data());
 
-        auto const lp = Core::ParseLaunchParams(*QtCommon::system, args_cstr.size(), args_cstr.data(), nullptr);
+        launch =
+            Core::ParseLaunchParams(*QtCommon::system, args_cstr.size(), args_cstr.data(), nullptr);
+    }
+
+    // Once FixProfiles has read the configured NAND and -u may have picked another user.
+    Common::Nextendo::MigrateAccountFile(
+        Service::Account::Nextendo::CurrentProfile(*QtCommon::system));
+    // A default user made for an unreadable profiles.dat would make every account an orphan.
+    auto& profile_manager = QtCommon::system->GetProfileManager();
+    auto orphans =
+        profile_manager.UserSaveFileRead()
+            ? Common::Nextendo::OrphanAccounts(profile_manager.FindExistingProfileUUIDs())
+            : std::vector<Common::UUID>{};
+    std::erase_if(orphans, [kept = Settings::values.nextendo_kept_accounts.GetValue()](
+                               const Common::UUID& profile) {
+        return kept.find(profile.FormattedString()) != std::string::npos;
+    });
+    if (!orphans.empty()) {
+        const auto answer = QMessageBox::question(
+            this, tr("Nextendo Sign-ins"),
+            tr("Lichii found Nextendo sign-ins for %n profile(s) this NAND doesn't have. Profiles "
+               "deleted in an older build left theirs behind.\n\nRemove and sign out those "
+               "sign-ins? Keep them if the profiles are in another NAND folder.",
+               "", static_cast<int>(orphans.size())));
+        if (answer == QMessageBox::Yes) {
+            for (const auto& profile : orphans) {
+                const auto account = Common::Nextendo::LoadAccount(profile);
+                Common::Nextendo::ClearAccount(profile);
+                if (account && !account->refresh_token.empty()) {
+                    void(QtConcurrent::run(
+                        [client_id = Settings::values.nextendo_client_id.GetValue(),
+                         token = account->refresh_token] {
+                            Common::Nextendo::RevokeToken(client_id, token);
+                        }));
+                }
+            }
+        } else {
+            std::string kept = Settings::values.nextendo_kept_accounts.GetValue();
+            for (const auto& profile : orphans) {
+                kept += fmt::format("{}{}", kept.empty() ? "" : ",", profile.FormattedString());
+            }
+            Settings::values.nextendo_kept_accounts = kept;
+        }
+    }
+    nextendo_session_timer.start(std::chrono::minutes{2});
+    KeepNextendoSessionAlive();
+
+    if (launch) {
+        const auto& lp = *launch;
 
         // Override fullscreen setting if gamepath or argument is provided
         if (!lp.filepath.empty() || lp.fullscreen) {
@@ -1124,6 +1302,7 @@ void MainWindow::InitializeWidgets() {
 
     volume_button = new VolumeButton();
     volume_button->setObjectName(QStringLiteral("TogglableStatusBarButton"));
+    volume_button->setProperty("chip", QStringLiteral("volume"));
     volume_button->setFocusPolicy(Qt::NoFocus);
     volume_button->setCheckable(true);
     UpdateVolumeUI();
@@ -1165,6 +1344,7 @@ void MainWindow::InitializeWidgets() {
 
     frame_gen_status_button = new QPushButton();
     frame_gen_status_button->setObjectName(QStringLiteral("TogglableStatusBarButton"));
+    frame_gen_status_button->setProperty("chip", QStringLiteral("fg"));
     frame_gen_status_button->setFocusPolicy(Qt::NoFocus);
     frame_gen_status_button->setCheckable(true);
     connect(frame_gen_status_button, &QPushButton::clicked, this, [this] {
@@ -1225,6 +1405,7 @@ void MainWindow::InitializeWidgets() {
 #ifdef HAS_RESHADE
     post_shader_status_button = new QPushButton();
     post_shader_status_button->setObjectName(QStringLiteral("TogglableStatusBarButton"));
+    post_shader_status_button->setProperty("chip", QStringLiteral("fx"));
     post_shader_status_button->setFocusPolicy(Qt::NoFocus);
     post_shader_status_button->setCheckable(true);
     connect(post_shader_status_button, &QPushButton::clicked, this, [this] {
@@ -1260,6 +1441,7 @@ void MainWindow::InitializeWidgets() {
     // setup AA button
     aa_status_button = new QPushButton();
     aa_status_button->setObjectName(QStringLiteral("TogglableStatusBarButton"));
+    aa_status_button->setProperty("chip", QStringLiteral("aa"));
     aa_status_button->setFocusPolicy(Qt::NoFocus);
     connect(aa_status_button, &QPushButton::clicked, [&] {
         auto aa_mode = Settings::values.anti_aliasing.GetValue();
@@ -1293,6 +1475,7 @@ void MainWindow::InitializeWidgets() {
     // Setup Filter button
     filter_status_button = new QPushButton();
     filter_status_button->setObjectName(QStringLiteral("TogglableStatusBarButton"));
+    filter_status_button->setProperty("chip", QStringLiteral("filter"));
     filter_status_button->setFocusPolicy(Qt::NoFocus);
     connect(filter_status_button, &QPushButton::clicked, this, &MainWindow::OnToggleAdaptingFilter);
     UpdateFilterText();
@@ -1318,6 +1501,7 @@ void MainWindow::InitializeWidgets() {
     // Setup Dock button
     dock_status_button = new QPushButton();
     dock_status_button->setObjectName(QStringLiteral("DockingStatusBarButton"));
+    dock_status_button->setProperty("chip", QStringLiteral("dock"));
     dock_status_button->setFocusPolicy(Qt::NoFocus);
     connect(dock_status_button, &QPushButton::clicked, this, &MainWindow::OnToggleDockedMode);
     dock_status_button->setCheckable(true);
@@ -1344,6 +1528,7 @@ void MainWindow::InitializeWidgets() {
     // Setup GPU Accuracy button
     gpu_accuracy_button = new QPushButton();
     gpu_accuracy_button->setObjectName(QStringLiteral("GPUStatusBarButton"));
+    gpu_accuracy_button->setProperty("chip", QStringLiteral("gpu"));
     gpu_accuracy_button->setCheckable(true);
     gpu_accuracy_button->setFocusPolicy(Qt::NoFocus);
     connect(gpu_accuracy_button, &QPushButton::clicked, this, &MainWindow::OnToggleGpuAccuracy);
@@ -1469,6 +1654,7 @@ void MainWindow::InitializeHotkeys() {
     hotkey_registry.LoadHotkeys();
 
     LinkActionShortcut(ui->action_Load_File, QStringLiteral("Load File"));
+    LinkActionShortcut(ui->action_Load_Amiibo, QStringLiteral("Load/Remove Amiibo"));
     LinkActionShortcut(ui->action_Exit, QStringLiteral("Exit Eglantine"));
     LinkActionShortcut(ui->action_Restart, QStringLiteral("Restart Emulation"));
     LinkActionShortcut(ui->action_Pause, QStringLiteral("Continue/Pause Emulation"));
@@ -1479,6 +1665,7 @@ void MainWindow::InitializeHotkeys() {
                        QStringLiteral("Toggle Performance Overlay"));
     LinkActionShortcut(ui->action_Fullscreen, QStringLiteral("Fullscreen"));
     LinkActionShortcut(ui->action_Capture_Screenshot, QStringLiteral("Capture Screenshot"));
+    LinkActionShortcut(ui->action_Report_Bug, QStringLiteral("Report a Bug"));
     LinkActionShortcut(ui->action_TAS_Start, QStringLiteral("TAS Start/Stop"), true);
     LinkActionShortcut(ui->action_TAS_Record, QStringLiteral("TAS Record"), true);
     LinkActionShortcut(ui->action_TAS_Reset, QStringLiteral("TAS Reset"), true);
@@ -1511,6 +1698,11 @@ void MainWindow::InitializeHotkeys() {
     });
     connect_shortcut(QStringLiteral("Change Adapting Filter"), &MainWindow::OnToggleAdaptingFilter);
     connect_shortcut(QStringLiteral("Change Docked Mode"), &MainWindow::OnToggleDockedMode);
+    connect_shortcut(QStringLiteral("HOME Button"), [this] {
+        if (emulation_running) {
+            QtCommon::system->GetAppletManager().PressHomeButton();
+        }
+    });
     connect_shortcut(QStringLiteral("Change GPU Mode"), &MainWindow::OnToggleGpuAccuracy);
     connect_shortcut(QStringLiteral("Change Upscaler"), &MainWindow::OnCycleUpscaler);
     connect_shortcut(QStringLiteral("Audio Mute/Unmute"), &MainWindow::OnMute);
@@ -1518,16 +1710,28 @@ void MainWindow::InitializeHotkeys() {
     connect_shortcut(QStringLiteral("Audio Volume Up"), &MainWindow::OnIncreaseVolume);
 
     connect_shortcut(QStringLiteral("Toggle Framerate Limit"), [this] {
+        if (!emulation_running) {
+            return;
+        }
+        RememberSpeedLimitBeforeHotkey();
         Settings::ToggleStandardMode();
         SetFPSSuffix();
     });
 
     connect_shortcut(QStringLiteral("Toggle Turbo Speed"), [this] {
+        if (!emulation_running) {
+            return;
+        }
+        RememberSpeedLimitBeforeHotkey();
         Settings::ToggleTurboMode();
         SetFPSSuffix();
     });
 
     connect_shortcut(QStringLiteral("Toggle Slow Speed"), [this] {
+        if (!emulation_running) {
+            return;
+        }
+        RememberSpeedLimitBeforeHotkey();
         Settings::ToggleSlowMode();
         SetFPSSuffix();
     });
@@ -1823,6 +2027,7 @@ void MainWindow::ConnectMenuEvents() {
     connect_menu(ui->action_Desktop, &MainWindow::OnCreateHomeMenuDesktopShortcut);
     connect_menu(ui->action_Application_Menu, &MainWindow::OnCreateHomeMenuApplicationMenuShortcut);
     connect_menu(ui->action_Capture_Screenshot, &MainWindow::OnCaptureScreenshot);
+    connect_menu(ui->action_Report_Bug, &MainWindow::OnReportBug);
 
     // TAS
     connect_menu(ui->action_TAS_Start, &MainWindow::OnTasStartStop);
@@ -1841,6 +2046,11 @@ void MainWindow::ConnectMenuEvents() {
     connect_menu(ui->action_Firmware_From_Folder, &MainWindow::OnInstallFirmware);
     connect_menu(ui->action_Firmware_From_ZIP, &MainWindow::OnInstallFirmwareFromZIP);
     connect_menu(ui->action_Install_Keys, &MainWindow::OnInstallDecryptionKeys);
+#ifdef ENABLE_UPDATE_CHECKER
+    connect_menu(ui->action_Check_For_Updates, [this] { CheckForUpdates(true); });
+#else
+    ui->action_Check_For_Updates->setVisible(false);
+#endif
     connect_menu(ui->action_Whats_New, &MainWindow::OnWhatsNew);
     connect_menu(ui->action_About, &MainWindow::OnAbout);
     connect_menu(ui->action_Eden_Dependencies, &MainWindow::OnEdenDependencies);
@@ -1945,6 +2155,7 @@ void MainWindow::UpdateMenuState() {
     }
 
     ui->action_Capture_Screenshot->setEnabled(emulation_running && !is_paused);
+    ui->action_Report_Bug->setEnabled(emulation_running && !is_paused);
 
     if (emulation_running && is_paused) {
         ui->action_Pause->setText(tr("&Continue"));
@@ -2304,6 +2515,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     }
 
     PrepareShaderPrecache(title_id, std::filesystem::path{filename.toStdU16String()});
+    speed_limit_before_hotkeys.reset();
     Settings::LogSettings();
 
     if (UISettings::values.select_user_on_boot && !user_flag_cmd_line) {
@@ -2348,6 +2560,27 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
                                   tr("Game preparation failed. See the log for details."));
             return;
         }
+        if (close_pending) {
+            return;
+        }
+    }
+
+    if (loader && Common::Nextendo::OnlinePlayActive()) {
+        QProgressDialog progress(tr("Checking online patches..."), QString{}, 0, 0, this);
+        progress.setWindowModality(Qt::ApplicationModal);
+        progress.setWindowFlag(Qt::WindowCloseButtonHint, false);
+        progress.setCancelButton(nullptr);
+        progress.setMinimumDuration(0);
+        QFutureWatcher<void> watcher;
+        QEventLoop loop;
+        connect(&watcher, &QFutureWatcher<void>::finished, &loop, &QEventLoop::quit);
+        watcher.setFuture(QtConcurrent::run([&loader, title_id] {
+            Common::NplnPatchCatalog::PrepareForGame(
+                title_id, [&] { return loader->ReadMainBuildIdHex(*QtCommon::system); });
+            Service::BCAT::Nextendo::PrepareForGame(title_id);
+        }));
+        progress.show();
+        loop.exec();
         if (close_pending) {
             return;
         }
@@ -2447,6 +2680,12 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     QtCommon::system->RegisterExecuteProgramCallback(
         [this](std::size_t program_index_) { render_window->ExecuteProgram(program_index_); });
 
+    QtCommon::system->RegisterLaunchInNewSessionCallback([this](u64 program_id) {
+        QMetaObject::invokeMethod(
+            this, [this, program_id] { OnLaunchInNewSession(program_id); },
+            Qt::QueuedConnection);
+    });
+
     QtCommon::system->RegisterExitCallback([this] {
         QtCommon::emu_thread->ForceStop();
         render_window->Exit();
@@ -2523,11 +2762,18 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     if (metadata.first != nullptr) {
         title_version = metadata.first->GetVersionString();
         title_name = metadata.first->GetApplicationName();
+    } else if (FileSys::NACP control; QtCommon::system->GetAppLoader().ReadControlData(control) ==
+                                      Loader::ResultStatus::Success) {
+        title_version = control.GetVersionString();
     }
     if (res != Loader::ResultStatus::Success || title_name.empty()) {
         title_name = Common::FS::PathToUTF8String(
             std::filesystem::path{Common::U16StringFromBuffer(filename.utf16(), filename.size())}
                 .filename());
+    }
+    // The name the user gave the game in Properties wins, as in the library.
+    if (auto custom_title = QtCommon::Game::ReadCustomTitle(title_id); !custom_title.empty()) {
+        title_name = std::move(custom_title);
     }
     const bool is_64bit = QtCommon::system->Kernel().ApplicationProcess()->Is64Bit();
     const auto instruction_set_suffix = is_64bit ? tr("(64-bit)") : tr("(32-bit)");
@@ -2552,11 +2798,38 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
             ResetWindowSize720();
         }
     }
+    CheckNextendoOnlineStatus();
+    CheckNextendoGameVersion(title_id, title_version);
+    nextendo_social_timer.start(Common::Nextendo::FriendsRefreshInterval);
+    UpdateNextendoSocial();
     OnStartGame();
 }
 
 void MainWindow::BootGameFromList(const QString& filename, StartGameType with_config) {
     BootGame(filename, ApplicationAppletParameters(), with_config);
+}
+
+void MainWindow::RememberSpeedLimitBeforeHotkey() {
+    if (!speed_limit_before_hotkeys) {
+        speed_limit_before_hotkeys = SessionSpeedLimit{
+            .value = Settings::values.use_speed_limit.GetValue(),
+            .using_global = Settings::values.use_speed_limit.UsingGlobal(),
+        };
+    }
+}
+
+void MainWindow::UndoSessionSpeedChanges() {
+    // Undo the session's frame rate limit hotkey and turbo/slow modes. Only what the hotkeys
+    // changed is put back, in the scope (global or per-game) it was changed in: forcing the
+    // limit on here saved "Limit Speed Percent" as checked after every game, whatever the user
+    // had chosen.
+    // A configuration applied in a dialog that is still open replaces the hotkeys' change too.
+    if (speed_limit_before_hotkeys && !UISettings::values.configuration_applied &&
+        Settings::values.use_speed_limit.UsingGlobal() == speed_limit_before_hotkeys->using_global) {
+        Settings::values.use_speed_limit.SetValue(speed_limit_before_hotkeys->value);
+    }
+    speed_limit_before_hotkeys.reset();
+    Settings::values.current_speed_mode = Settings::SpeedMode::Standard;
 }
 
 bool MainWindow::OnShutdownBegin() {
@@ -2570,9 +2843,7 @@ bool MainWindow::OnShutdownBegin() {
 
     AllowOSSleep();
 
-    // Disable unlimited frame rate and turbo/slow modes
-    Settings::values.use_speed_limit.SetValue(true);
-    Settings::values.current_speed_mode = Settings::SpeedMode::Standard;
+    UndoSessionSpeedChanges();
 
     if (QtCommon::system->IsShuttingDown()) {
         status_bar_update_timer.stop();
@@ -2627,8 +2898,43 @@ void MainWindow::OnShutdownBeginDialog() {
     shutdown_dialog->open();
 }
 
+/// Ends the process at once: no destructors, no atexit handlers, no flush of C streams.
+[[noreturn]] static void EndProcessNow(int exit_code) {
+#ifdef _WIN32
+    TerminateProcess(GetCurrentProcess(), static_cast<UINT>(exit_code));
+#endif
+    std::_Exit(exit_code);
+}
+
+static s64 SteadyNowMs() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
+
+/// When set (steady clock ms), the exit watchdog ends the process once it is reached.
+static std::atomic<s64> exit_deadline_ms{0};
+
+/// Started at the first forced stop, while no lock can be stuck yet: arming it later (see
+/// ExitIfEmulationThreadStuck) only stores a deadline and allocates nothing.
+static void StartExitWatchdog() {
+    static std::once_flag started;
+    std::call_once(started, [] {
+        std::thread([] {
+            for (;;) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                const s64 deadline = exit_deadline_ms.load(std::memory_order_relaxed);
+                if (deadline != 0 && SteadyNowMs() >= deadline) {
+                    EndProcessNow(1);
+                }
+            }
+        }).detach();
+    });
+}
+
 void MainWindow::OnEmulationStopTimeExpired() {
     if (QtCommon::emu_thread) {
+        StartExitWatchdog();
         QtCommon::emu_thread->ForceStop();
         emu_force_stop_clock.start();
         shutdown_progress_seen = Common::ShutdownProgress();
@@ -2648,9 +2954,8 @@ bool MainWindow::EmulationShutdownProgressing() {
 }
 
 void MainWindow::OnEmulationStopTimeout() {
-    // Terminating the thread mid-teardown can leave a lock it holds (the heap's, the driver's)
-    // taken for good, which froze the whole app. While the teardown still moves (pipeline caches
-    // written, pipelines destroyed), it gets another timeout.
+    // While the teardown still moves (pipeline caches written, pipelines destroyed), it gets
+    // another timeout. A stalled teardown ends the process (see ExitIfEmulationThreadStuck).
     if (QtCommon::emu_thread && QtCommon::emu_thread->isRunning() &&
         EmulationShutdownProgressing()) {
         LOG_INFO(Frontend, "Emulation thread still shutting down after {} ms, waiting",
@@ -2658,20 +2963,33 @@ void MainWindow::OnEmulationStopTimeout() {
         emu_terminate_timer.start(EmuThreadStopTimeoutMs);
         return;
     }
-    TerminateEmulationThread();
+    ExitIfEmulationThreadStuck();
     OnEmulationStopped();
 }
 
-void MainWindow::TerminateEmulationThread() {
-    if (QtCommon::emu_thread && QtCommon::emu_thread->isRunning()) {
-        LOG_ERROR(Frontend, "Emulation thread failed to stop, terminating it");
-        // On Windows terminate() emits finished with the thread's mutex held, and
-        // OnEmulationStopped calls isRunning(), which takes it. Both callers run it afterwards.
-        disconnect(QtCommon::emu_thread.get(), &QThread::finished, this,
-                   &MainWindow::OnEmulationStopped);
-        QtCommon::emu_thread->terminate();
-        QtCommon::emu_thread->wait();
+/// Called when the stop wait is over. Returns if the emulation thread has stopped. If it still
+/// runs, saves the settings and ends the process with all threads alive, so the program closes
+/// from Stop as well as from the window close. Terminating the thread instead can orphan a lock
+/// it holds (the process heap's, a driver's), after which every allocation in the process hangs.
+void MainWindow::ExitIfEmulationThreadStuck() {
+    if (!QtCommon::emu_thread || !QtCommon::emu_thread->isRunning()) {
+        return;
     }
+    // The stuck thread can hold a lock that the save needs. The save gets this long.
+    exit_deadline_ms.store(SteadyNowMs() + 5'000, std::memory_order_relaxed);
+    LOG_ERROR(Frontend,
+              "Emulation thread failed to stop after {} ms (shutdown progress {}); saving "
+              "settings and exiting",
+              emu_force_stop_clock.elapsed(), Common::ShutdownProgress());
+    play_time_manager->Stop();
+    UpdateUISettings();
+    game_list->SaveInterfaceLayout();
+    UISettings::SaveWindowState();
+    hotkey_registry.SaveHotkeys();
+    config->SaveAllValues();
+    LOG_INFO(Frontend, "Settings saved; exiting without emulation cleanup");
+    Common::Log::Stop();
+    EndProcessNow(0);
 }
 
 void MainWindow::OnEmulationStopped() {
@@ -2681,6 +2999,10 @@ void MainWindow::OnEmulationStopped() {
     if (QtCommon::emu_thread && QtCommon::emu_thread->isRunning()) {
         return;
     }
+    if (bug_report_dialog) {
+        bug_report_dialog->StopCapture();
+    }
+    UndoSessionSpeedChanges();
     shutdown_timer.stop();
     emu_terminate_timer.stop();
     if (QtCommon::emu_thread) {
@@ -2695,6 +3017,26 @@ void MainWindow::OnEmulationStopped() {
     }
 
     emulation_running = false;
+    nextendo_version_check.reset();
+
+    nextendo_social_timer.stop();
+    if (Common::Nextendo::OnlinePlayActive()) {
+        const auto post_offline =
+            [client_id = Settings::values.nextendo_client_id.GetValue(),
+             profile = Service::Account::Nextendo::CurrentProfile(*QtCommon::system)] {
+                void(QtConcurrent::run([client_id, profile] {
+                    void(Common::Nextendo::UpdatePresence(client_id, profile, 0));
+                }));
+            };
+        // A refresh still running would post playing after the offline one.
+        if (nextendo_social_watcher.isRunning()) {
+            connect(&nextendo_social_watcher, &QFutureWatcher<void>::finished, this, post_offline,
+                    Qt::SingleShotConnection);
+        } else {
+            post_offline();
+        }
+    }
+    SyncNextendoProfile(false);
 
     game_list->SetReportableProgramId(report_session ? report_session->program_id : 0);
 
@@ -2775,6 +3117,9 @@ void MainWindow::ShutdownGame() {
         return;
     }
 
+    if (bug_report_dialog) {
+        bug_report_dialog->StopCapture();
+    }
     // TODO(crueter): make this common as well (frontend_common?)
     play_time_manager->Stop();
     OnShutdownBegin();
@@ -2795,7 +3140,7 @@ void MainWindow::ShutdownGame() {
         } while (QtCommon::emu_thread && QtCommon::emu_thread->isRunning() &&
                  EmulationShutdownProgressing());
     }
-    TerminateEmulationThread();
+    ExitIfEmulationThreadStuck();
     OnEmulationStopped();
 }
 
@@ -3116,6 +3461,14 @@ void MainWindow::OnGameListDumpRomFS(u64 program_id, const std::string& game_pat
             failed();
             return;
         }
+    } else if (loader->GetFileType() == Loader::FileType::NUP) {
+        // A NUP is never installed either: its loader gives the RomFS with the newest update
+        // already merged over the base.
+        title_id = program_id;
+        if (loader->ReadRomFS(romfs) != Loader::ResultStatus::Success || romfs == nullptr) {
+            failed();
+            return;
+        }
     } else {
         FileSys::VirtualFile packed_update_raw{};
         loader->ReadUpdateRaw(packed_update_raw);
@@ -3284,13 +3637,14 @@ void MainWindow::OnGameListShowList(bool show) {
     game_list_placeholder->setVisible(!show);
 };
 
-void MainWindow::OnGameListOpenPerGameProperties(const std::string& file) {
-    u64 title_id{};
+void MainWindow::OnGameListOpenPerGameProperties(u64 title_id, const std::string& file) {
     {
         const auto v_file = Core::GetGameFileFromPath(QtCommon::vfs, file);
-        const auto loader = Loader::GetLoader(*QtCommon::system, v_file);
+        const auto loader = Loader::GetLoader(*QtCommon::system, v_file, title_id);
 
-        if (loader == nullptr || loader->ReadProgramId(title_id) != Loader::ResultStatus::Success) {
+        u64 loaded_id{};
+        if (!loader || loader->ReadProgramId(loaded_id) != Loader::ResultStatus::Success ||
+            loaded_id != title_id) {
             QMessageBox::information(this, tr("Properties"),
                                      tr("The game properties could not be loaded."));
             return;
@@ -3301,45 +3655,50 @@ void MainWindow::OnGameListOpenPerGameProperties(const std::string& file) {
 }
 
 void MainWindow::OnLinkToRyujinx(const u64& program_id) {
-    namespace fs = std::filesystem;
+    if (emulation_running) {
+        QMessageBox::warning(this, tr("Stop emulation before linking saves"),
+                             tr("Close the running game before changing Ryujinx save links."));
+        return;
+    }
 
-    fs::path ryu_dir;
+    const auto profile = GetProfileID();
+    if (!profile) {
+        return;
+    }
 
-    // find an existing Ryujinx linked path in config.ini; if it exists, use it as a "hint"
-    // If it's not defined in config.ini, use default
-    const fs::path existing_path =
+    auto ryujinx_root =
         UISettings::values.ryujinx_link_paths
             .value(program_id, QDir(Common::FS::GetLegacyPath(Common::FS::RyujinxDir)))
             .filesystemAbsolutePath();
 
-    // this function also prompts the user to manually specify a portable location
-    ryu_dir = QtCommon::FS::GetRyujinxSavePath(existing_path, program_id);
-
-    if (ryu_dir.empty())
+    const auto save = QtCommon::FS::ChooseRyujinxSave(ryujinx_root, program_id, profile->AsU128());
+    if (!save) {
         return;
+    }
 
-    const std::string user_id = GetProfileIDString();
-    if (user_id.empty())
-        return;
+    const bool device = save->type == Common::FS::RyujinxSaveType::Device;
+    const auto type = device ? FileSys::SaveDataType::Device : FileSys::SaveDataType::Account;
+    const auto user = device ? u128{} : profile->AsU128();
+    const auto save_root = Common::FS::GetEdenPath(Common::FS::EdenPath::SaveDir);
+    const auto vfs_root = QtCommon::vfs->OpenDirectory(Common::FS::PathToUTF8String(save_root),
+                                                       FileSys::OpenMode::Read);
+    const auto lichii_dir = Common::FS::ConcatPathSafe(
+        save_root, FileSys::SaveDataFactory::GetFullPath(
+                       {}, vfs_root, FileSys::SaveDataSpaceId::User, type, program_id, user, 0));
 
-    const std::string hex_program = fmt::format("{:016X}", program_id);
-
-    const fs::path eden_dir = FrontendCommon::DataManager::GetDataDir(
-                                  FrontendCommon::DataManager::DataDir::Saves, user_id) /
-                              hex_program;
-
-    // CheckUnlink basically just checks to see if one or both are linked, and prompts the user to
-    // unlink if this is the case.
-    // If it returns false, neither dir is linked so it's fine to continue
-    if (!QtCommon::FS::CheckUnlink(eden_dir, ryu_dir)) {
-        RyujinxDialog dialog(eden_dir, ryu_dir, this);
-        if (dialog.exec() == QDialog::Accepted) {
-            UISettings::values.ryujinx_link_paths.insert(
-                program_id,
-                QString::fromStdString(Common::FS::GetRyuPathFromSavePath(ryu_dir).string()));
+    if (const auto unlinked = QtCommon::FS::CheckUnlink(lichii_dir, save->path)) {
+        if (!*unlinked) {
+            return;
         }
-    } else {
         UISettings::values.ryujinx_link_paths.remove(program_id);
+    } else {
+        RyujinxDialog dialog(lichii_dir, save->path,
+                             QString::fromStdString(fmt::format("{:016x}", save->save_id)), this);
+        if (dialog.exec() != QDialog::Accepted) {
+            return;
+        }
+        UISettings::values.ryujinx_link_paths.insert(
+            program_id, QString::fromStdU16String(ryujinx_root.u16string()));
     }
 
     config->SaveAllValues();
@@ -3707,6 +4066,40 @@ void MainWindow::OnExecuteProgram(std::size_t program_index) {
     BootGame(filename, params);
 }
 
+void MainWindow::OnLaunchInNewSession(u64 program_id) {
+    // A request queued while its session stops would run inside ShutdownGame's event loop and boot
+    // under the outer shutdown, which then takes the new session's thread for a stuck one.
+    if (!emulation_running || QtCommon::system->IsShuttingDown()) {
+        LOG_WARNING(Frontend, "Dropping HOME Menu launch of {:016X}: its session is stopping",
+                    program_id);
+        return;
+    }
+    auto* const model = game_list->GetModel();
+    const auto matches =
+        model->match(model->index(0, 0), GameListItemPath::ProgramIdRole,
+                     QVariant::fromValue(qulonglong{program_id}), 1,
+                     Qt::MatchExactly | Qt::MatchRecursive);
+    QString filename;
+    if (!matches.isEmpty()) {
+        filename = matches.front().data(GameListItemPath::FullPathRole).toString();
+    } else if (const auto nca = QtCommon::system->GetContentProviderUnion().GetEntryRaw(
+                   program_id, FileSys::ContentRecordType::Program)) {
+        filename = QString::fromStdString(nca->GetFullPath());
+    }
+
+    LOG_INFO(Frontend, "HOME Menu launch of {:016X} in a new session from {}", program_id,
+             filename.toStdString());
+
+    ShutdownGame();
+    if (filename.isEmpty()) {
+        return;
+    }
+
+    auto params = ApplicationAppletParameters();
+    params.program_id = program_id;
+    BootGame(filename, params);
+}
+
 void MainWindow::OnExit() {
     ShutdownGame();
 }
@@ -3828,6 +4221,9 @@ void MainWindow::ShowFullscreen() {
             return;
         }
         window->hide();
+        // A maximized window keeps the work area and ignores the new geometry, so the taskbar
+        // stays visible; the saved geometry restores the maximized state afterwards.
+        window->setWindowState(window->windowState() & ~Qt::WindowMaximized);
         window->setWindowFlags(window->windowFlags() | Qt::FramelessWindowHint);
         const auto screen_geometry = GuessCurrentScreen(window)->geometry();
         window->setGeometry(screen_geometry.x(), screen_geometry.y(), screen_geometry.width(),
@@ -4028,6 +4424,14 @@ void MainWindow::OnConfigure() {
 #ifdef __unix__
     const bool old_force_x11 = UISettings::values.gui_force_x11.GetValue();
 #endif
+    const bool old_nextendo_sync = Settings::values.nextendo_sync_profile.GetValue();
+    const auto old_current_user = Settings::values.current_user.GetValue();
+    const auto nextendo_pid = [] {
+        const auto account = Common::Nextendo::LoadAccount(
+            Service::Account::Nextendo::CurrentProfile(*QtCommon::system));
+        return account ? account->pid : 0;
+    };
+    const u64 old_nextendo_pid = nextendo_pid();
 
     Settings::SetConfiguringGlobal(true);
     ConfigureDialog configure_dialog(this, hotkey_registry, input_subsystem.get(),
@@ -4043,8 +4447,12 @@ void MainWindow::OnConfigure() {
         !UISettings::values.reset_to_defaults) {
         // Runs if the user hit Cancel or closed the window, and did not ever press the Apply button
         // or `Reset to Defaults` button
+        configure_dialog.RestoreInputConfiguration();
         return;
-    } else if (result == QDialog::Accepted) {
+    }
+    // Applied settings (OK, Apply or Reset to Defaults) replace the speed limit the hotkeys changed.
+    speed_limit_before_hotkeys.reset();
+    if (result == QDialog::Accepted) {
         // Only apply new changes if user hit Okay
         // This is here to avoid applying changes if the user hit Apply, made some changes, then hit
         // Cancel
@@ -4097,6 +4505,11 @@ void MainWindow::OnConfigure() {
         GraphicsBackend::SetForceX11(UISettings::values.gui_force_x11.GetValue());
     }
 #endif
+    // Just ticked, or a sign-in or another user since.
+    if (!old_nextendo_sync || nextendo_pid() != old_nextendo_pid ||
+        Settings::values.current_user.GetValue() != old_current_user) {
+        SyncNextendoProfile(true);
+    }
 
     if (!multiplayer_state->IsHostingPublicRoom()) {
         multiplayer_state->UpdateCredentials();
@@ -4112,6 +4525,11 @@ void MainWindow::OnConfigure() {
     UISettings::values.configuration_applied = false;
 
     config->SaveAllValues();
+
+    if (result != QDialog::Accepted) {
+        // Cancel after Apply: keep what was applied, drop the controller edits made after it
+        configure_dialog.RestoreInputConfiguration();
+    }
 
     if ((UISettings::values.hide_mouse || Settings::values.mouse_panning) && emulation_running) {
         render_window->installEventFilter(render_window);
@@ -4322,13 +4740,33 @@ void MainWindow::OpenPerGameConfiguration(u64 title_id, const std::string& file_
     Settings::SetConfiguringGlobal(false);
     ConfigurePerGame dialog(this, title_id, file_name, vk_device_records, *QtCommon::system);
     dialog.LoadFromFile(Core::GetGameFileFromPath(QtCommon::vfs, file_name));
+    // Artwork saved here wins over a SteamGridDB lookup still running for the game.
+    connect(&dialog, &ConfigurePerGame::CustomArtworkChanged, game_list,
+            &GameList::OnCustomArtworkChanged);
 
     const auto result = dialog.exec();
 
+    // A rename only changes the shown name: no rescan of the library.
+    if (const auto renamed = dialog.RenamedTitle()) {
+        game_list->SetGameTitle(title_id, *renamed);
+    }
+    // The running game shows the new name in the window title too, also when the custom name was
+    // removed from a game that has no name of its own to show in the library.
+    if (dialog.TitleChanged() && emulation_running && title_id != 0 &&
+        title_id == QtCommon::system->GetApplicationProcessProgramID()) {
+        OnApplicationChanged(title_id);
+    }
+
     if (result != QDialog::Accepted && !UISettings::values.configuration_applied) {
+        // Artwork saved before a failed save of the rest stays saved after Cancel: show it.
+        if (UISettings::values.is_game_list_reload_pending.exchange(false)) {
+            OnGameListRefresh();
+        }
         Settings::RestoreGlobalState(QtCommon::system->IsPoweredOn());
         return;
-    } else if (result == QDialog::Accepted) {
+    }
+    speed_limit_before_hotkeys.reset();
+    if (result == QDialog::Accepted) {
         dialog.ApplyConfiguration();
     }
 
@@ -4814,10 +5252,10 @@ void MainWindow::PrepareShaderPrecache(u64 title_id, const std::filesystem::path
         QMessageBox box(QMessageBox::Question, tr("Precache Shaders"),
                         tr("The shaders of this game are not precached yet. Precache them now?\n\n"
                            "The game starts when they are done. The first time, the game files "
-                           "are read and their shaders are built on every CPU thread, with the "
-                           "shaders earlier play sessions saved, which takes a few minutes. Later "
-                           "launches only build what is new, until the GPU driver changes. The "
-                           "loading screen has a Skip button.\n\n"
+                           "are read and their compute shaders are built on every CPU thread, "
+                           "which takes a few minutes. Later launches only build what is new, "
+                           "until the GPU driver changes. The loading screen has a Skip "
+                           "button.\n\n"
                            "You can change this in Configure, Graphics, Advanced."),
                         QMessageBox::NoButton, this);
         QPushButton* const precache = box.addButton(tr("Precache now"), QMessageBox::AcceptRole);
@@ -5199,19 +5637,134 @@ void MainWindow::OnCaptureScreenshot() {
     render_window->CaptureScreenshot(filename);
 }
 
+void MainWindow::OnReportBug() {
+    if (bug_report_dialog || QtCommon::emu_thread == nullptr || !QtCommon::emu_thread->IsRunning()) {
+        return;
+    }
+    BugReportDialog dialog(*QtCommon::system, this);
+    bug_report_dialog = &dialog;
+    dialog.exec();
+    bug_report_dialog = nullptr;
+}
+
 void MainWindow::KeepNextendoSessionAlive() {
     if (!Common::Nextendo::OnlinePlayActive() || nextendo_session_watcher.isRunning()) {
         return;
     }
-    nextendo_session_watcher.setFuture(
+    // Only the profile a game plays with, or the one the next game boots with: a heartbeat for
+    // every signed-in profile would spend the request budget.
+    nextendo_session_watcher.setFuture(QtConcurrent::run(
+        [client_id = Settings::values.nextendo_client_id.GetValue(),
+         profile = Service::Account::Nextendo::CurrentProfile(*QtCommon::system)] {
+            return Common::Nextendo::KeepSessionAlive(client_id, profile);
+        }));
+}
+
+void MainWindow::UpdateNextendoSocial() {
+    if (!Common::Nextendo::OnlinePlayActive() || nextendo_social_watcher.isRunning()) {
+        return;
+    }
+    nextendo_social_watcher.setFuture(
+        QtConcurrent::run([client_id = Settings::values.nextendo_client_id.GetValue(),
+                           profile = Service::Account::Nextendo::CurrentProfile(*QtCommon::system),
+                           program_id = QtCommon::system->GetApplicationProcessProgramID()] {
+            void(Common::Nextendo::RefreshFriends(client_id, profile));
+            void(Common::Nextendo::UpdatePresence(client_id, profile, program_id));
+        }));
+}
+
+void MainWindow::SyncNextendoProfile(bool force) {
+    nextendo_profile_force |= force;
+    if (!Common::Nextendo::OnlinePlayActive() ||
+        !Settings::values.nextendo_sync_profile.GetValue() || QtCommon::system->IsPoweredOn() ||
+        nextendo_profile_watcher.isRunning()) {
+        return;
+    }
+    const auto user = QtCommon::system->GetProfileManager().GetUser(
+        static_cast<std::size_t>(Settings::values.current_user.GetValue()));
+    if (!user) {
+        return;
+    }
+    nextendo_profile_user = *user;
+    nextendo_profile_watcher.setFuture(
+        QtConcurrent::run([client_id = Settings::values.nextendo_client_id.GetValue(), user = *user,
+                           force = std::exchange(nextendo_profile_force, false)] {
+            return Common::Nextendo::PullProfile(client_id, user, force);
+        }));
+}
+
+void MainWindow::CheckNextendoOnlineStatus() {
+    if (!Common::Nextendo::OnlinePlayActive() || nextendo_status_watcher.isRunning()) {
+        return;
+    }
+    nextendo_status_profile = Service::Account::Nextendo::CurrentProfile(*QtCommon::system);
+    nextendo_status_watcher.setFuture(
+        QtConcurrent::run([client_id = Settings::values.nextendo_client_id.GetValue(),
+                           profile = nextendo_status_profile] {
+            return Common::Nextendo::CheckOnlineStatus(client_id, profile);
+        }));
+}
+
+void MainWindow::CheckNextendoGameVersion(u64 title_id, std::string version) {
+    if (!Common::Nextendo::OnlinePlayActive()) {
+        return;
+    }
+    nextendo_version_check.emplace(title_id, std::move(version));
+    if (nextendo_catalog_watcher.isRunning()) {
+        return;
+    }
+    nextendo_catalog_watcher.setFuture(
         QtConcurrent::run([client_id = Settings::values.nextendo_client_id.GetValue()] {
-            return Common::Nextendo::KeepSessionAlive(client_id);
+            return Common::Nextendo::LoadGameCatalog(client_id);
         }));
 }
 
 #ifdef ENABLE_UPDATE_CHECKER
+void MainWindow::CheckForUpdates(bool manual) {
+    if (update_check_running) {
+        // Report the check already in flight instead of starting another one.
+        update_check_manual |= manual;
+        return;
+    }
+    update_check_running = true;
+    update_check_manual = manual;
+    update_future = QtConcurrent::run([] { return UpdateChecker::Check(); });
+    update_watcher.setFuture(update_future);
+}
+
 void MainWindow::OnEmulatorUpdateAvailable() {
+    const bool manual = std::exchange(update_check_manual, false);
+    update_check_running = false;
     const auto result = update_future.result();
+    if (manual && result.failure != UpdateChecker::Failure::None) {
+        const auto title = tr("Check for Updates");
+        switch (result.failure) {
+        case UpdateChecker::Failure::NotReleaseBuild:
+            QMessageBox::information(
+                this, title,
+                tr("This is a test or development build (%1) without a published release tag, so "
+                   "Lichii cannot compare it with published releases. Download a release from "
+                   "GitHub to get updates.")
+                    .arg(QString::fromUtf8(Common::g_build_version)));
+            break;
+        case UpdateChecker::Failure::RateLimited:
+            QMessageBox::warning(this, title,
+                                 tr("GitHub is limiting requests from your network right now. "
+                                    "Please try again later."));
+            break;
+        case UpdateChecker::Failure::Http:
+            QMessageBox::warning(this, title,
+                                 tr("GitHub answered with HTTP error %1. Please try again later.")
+                                     .arg(result.status));
+            break;
+        default:
+            QMessageBox::warning(
+                this, title,
+                tr("Could not reach GitHub. Check your internet connection and try again."));
+            break;
+        }
+        return;
+    }
     if (result.failure == UpdateChecker::Failure::RateLimited) {
         statusBar()->showMessage(
             tr("Could not check for updates: GitHub rate limit reached. Lichii will try again at "
@@ -5226,13 +5779,18 @@ void MainWindow::OnEmulatorUpdateAvailable() {
         return;
     }
     if (!result.update) {
+        if (manual) {
+            QMessageBox::information(this, tr("Check for Updates"),
+                                     tr("You're on the latest build (%1).")
+                                         .arg(QString::fromUtf8(Common::g_build_release_tag)));
+        }
         return;
     }
 
     const auto& release = *result.update;
     const auto now = static_cast<unsigned long long>(QDateTime::currentSecsSinceEpoch());
-    if (UISettings::values.skipped_update_tag.GetValue() == release.tag ||
-        UISettings::values.update_remind_at.GetValue() > now) {
+    if (!manual && (UISettings::values.skipped_update_tag.GetValue() == release.tag ||
+                    UISettings::values.update_remind_at.GetValue() > now)) {
         return;
     }
 
@@ -5263,11 +5821,22 @@ void MainWindow::OnApplicationChanged(u64 program_id) {
     std::string title_name;
     std::string title_version;
 
+    // The loader's name stays when the game has no control metadata (a NUP without an installed
+    // control record), as on boot.
+    if (QtCommon::system->GetGameName(title_name) != Loader::ResultStatus::Success) {
+        title_name.clear();
+    }
+
     const FileSys::PatchManager pm(program_id, QtCommon::system->GetFileSystemController(),
                                    QtCommon::system->GetContentProvider());
     if (const auto metadata = pm.GetControlMetadata(); metadata.first != nullptr) {
         title_version = metadata.first->GetVersionString();
-        title_name = metadata.first->GetApplicationName();
+        if (auto metadata_name = metadata.first->GetApplicationName(); !metadata_name.empty()) {
+            title_name = std::move(metadata_name);
+        }
+    }
+    if (auto custom_title = QtCommon::Game::ReadCustomTitle(program_id); !custom_title.empty()) {
+        title_name = std::move(custom_title);
     }
     if (title_name.empty()) {
         title_name = fmt::format("{:016X}", program_id);
@@ -5285,6 +5854,7 @@ void MainWindow::OnApplicationChanged(u64 program_id) {
 
     UpdateWindowTitle(title_name, title_version,
                       QtCommon::system->GPU().Renderer().GetDeviceVendor());
+    CheckNextendoGameVersion(program_id, std::move(title_version));
 
     // Switch to record playtime for the running program
     if (play_time_manager)
@@ -5609,8 +6179,8 @@ void MainWindow::UpdateFrameGenButton() {
         unavailable = tr("This build was compiled without frame generation.");
         break;
     case VideoCore::FrameGenState::UnsupportedGpu:
-        unavailable = tr("This GPU lacks Vulkan features LSFG needs (Vulkan memory model, null "
-                         "descriptors and 16-bit floats). The Optical Flow type may still work.");
+        unavailable = tr("This GPU lacks Vulkan features LSFG needs (Vulkan memory model and null "
+                         "descriptors). The Optical Flow type may still work.");
         break;
     case VideoCore::FrameGenState::UnsupportedSurface:
         unavailable = tr("This GPU can't write to the window's swapchain format from a shader, so "
@@ -5928,11 +6498,19 @@ bool MainWindow::SelectRomFSDumpTarget(const FileSys::ContentProvider& installed
     using ContentInfo = std::tuple<u64, FileSys::TitleType, FileSys::ContentRecordType>;
     boost::container::flat_set<ContentInfo> available_title_ids;
 
+    std::vector<u64> add_on_content;
+    for (const auto& entry :
+         installed.ListEntriesFilter(FileSys::TitleType::AOC, FileSys::ContentRecordType::Data)) {
+        add_on_content.push_back(entry.title_id);
+    }
+    const u64 add_on_base = FileSys::GetAddOnApplicationID(program_id, add_on_content);
+
     const auto RetrieveEntries = [&](FileSys::TitleType title_type,
                                      FileSys::ContentRecordType record_type) {
+        const u64 base = title_type == FileSys::TitleType::AOC ? add_on_base : program_id;
         const auto entries = installed.ListEntriesFilter(title_type, record_type);
         for (const auto& entry : entries) {
-            if (FileSys::GetBaseTitleID(entry.title_id) == program_id &&
+            if (FileSys::GetBaseTitleID(entry.title_id) == base &&
                 installed.GetEntry(entry)->GetStatus() == Loader::ResultStatus::Success) {
                 available_title_ids.insert({entry.title_id, title_type, record_type});
             }
@@ -6177,7 +6755,7 @@ static QPalette LichiiPalette() {
 }
 
 void MainWindow::UpdateMenuIcons() {
-    const std::array<std::pair<QAction*, const char*>, 55> icons{{
+    const std::array<std::pair<QAction*, const char*>, 56> icons{{
         {ui->action_Install_File_NAND, "download"},
         {ui->action_Load_File, "file"},
         {ui->action_Load_Folder, "folder"},
@@ -6230,6 +6808,7 @@ void MainWindow::UpdateMenuIcons() {
         {ui->action_Open_UserHandbook, "help"},
         {ui->action_Apply_Recommended_Settings, "wand"},
         {ui->action_Restore_Previous_Settings, "restart"},
+        {ui->action_Check_For_Updates, "download"},
         {ui->action_Whats_New, "sparkles"},
         {ui->action_About, "info"},
         {ui->action_Eden_Dependencies, "list"},

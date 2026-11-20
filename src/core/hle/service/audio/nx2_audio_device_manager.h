@@ -17,7 +17,6 @@
 
 #include <fmt/ranges.h>
 
-#include "common/settings.h"
 #include "common/string_util.h"
 #include "audio_core/audio_core.h"
 #include "core/core.h"
@@ -31,58 +30,20 @@
 #include "core/hle/service/ipc_helpers.h"
 #include "core/hle/service/kernel_helpers.h"
 #include "core/hle/service/service.h"
-#include "video_core/nx2_perf.h"
 
 namespace Service::Audio {
 
 struct Nx2SysmixStreams {
     explicit Nx2SysmixStreams(Core::System& system_) : system{system_} {
         timer = Core::Timing::CreateEvent("sysmix output", [this](s64, std::chrono::nanoseconds late) {
-            const auto interval = std::chrono::nanoseconds{std::chrono::milliseconds{5}};
-            const auto missed = std::max(late, std::chrono::nanoseconds::zero()) / interval;
-            // A late wake skips the missed ticks below; they are owed and pumped as soon as a
-            // stream can take a block (a full host queue, SysmixQueueLimit, or a short guest ring
-            // keeps the debt for later ticks), or that audio is lost for good. Lateness after a
-            // pause is clamped by core timing, so a pause owes nothing. Over the cap (200 ms) the
-            // excess is dropped rather than played late as a burst. Only this callback touches
-            // catch_up (core timing runs it serialized).
-            constexpr u32 MaxOwed = 40;
-            catch_up.max_late_us = std::max<s64>(catch_up.max_late_us, late.count() / 1000);
-            u64 owed = u64{catch_up.owed} + static_cast<u64>(missed);
             std::unique_lock lock{mutex, std::try_to_lock};
-            if (!lock) {
-                ++owed; // This tick's pump too.
-            }
-            if (owed > MaxOwed) {
-                catch_up.dropped += owed - MaxOwed;
-                owed = MaxOwed;
-            }
-            catch_up.owed = static_cast<u32>(owed);
             if (lock) {
                 for (auto& [id, stream] : streams) {
-                    stream->Pump(&catch_up);
-                }
-                while (catch_up.owed > 0) {
-                    bool moved = false;
-                    for (auto& [id, stream] : streams) {
-                        moved |= stream->Pump(&catch_up);
-                    }
-                    if (!moved) {
-                        break;
-                    }
-                    --catch_up.owed;
-                }
-                // sysmix_ahead (default The Duskbloods): up to two blocks more a tick until the
-                // deeper host queue is full, so a guest mixer stalled behind a GPU-bound frame
-                // drains that queue instead of leaving gaps.
-                const bool ahead = VideoCommon::Nx2Perf::LiveOr(
-                    VideoCommon::Nx2Perf::g_sysmix_ahead,
-                    Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL);
-                for (auto& [id, stream] : streams) {
-                    for (int extra = 0; extra < 2 && stream->PumpAhead(ahead); ++extra) {
-                    }
+                    stream->Pump();
                 }
             }
+            const auto interval = std::chrono::nanoseconds{std::chrono::milliseconds{5}};
+            const auto missed = std::max(late, std::chrono::nanoseconds::zero()) / interval;
             return std::optional<std::chrono::nanoseconds>{interval * (missed + 1)};
         });
         system.CoreTiming().ScheduleLoopingEvent(std::chrono::milliseconds{5},
@@ -121,7 +82,6 @@ struct Nx2SysmixStreams {
 
     std::mutex mutex;
     std::map<u32, std::shared_ptr<SysmixOutput>> streams;
-    SysmixCatchUp catch_up;
     u32 next_id{1};
     Core::System& system;
     std::shared_ptr<Core::Timing::EventType> timer;
@@ -244,7 +204,11 @@ private:
         };
         put32(0x100, 3);
         put32(0x104, 2);
-        put32(0x108, 2);     // stereo
+        // Match the output channel count audren reports. Orbitals rejects a stereo device after
+        // GetActiveChannelCount said six and retries forever.
+        const bool surround =
+            !input && system.AudioCore().GetOutputSink().GetSystemChannels() == 6;
+        put32(0x108, surround ? 6 : 2);
         put32(0x10c, 48000); // Hz
         CopyName(block.data() + 0x110, input ? PhysicalInputDeviceName : PhysicalDeviceName);
         const u64 latency_ns = 10'000'000;

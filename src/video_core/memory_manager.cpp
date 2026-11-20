@@ -19,6 +19,7 @@
 #include "video_core/nx2_perf.h"
 #include "video_core/host1x/host1x.h"
 #include "video_core/invalidation_accumulator.h"
+#include "video_core/gpu_trace/recorder.h"
 #include "video_core/memory_manager.h"
 #include "video_core/rasterizer_interface.h"
 #include "video_core/renderer_base.h"
@@ -238,15 +239,26 @@ void MemoryManager::BindRasterizer(VideoCore::RasterizerInterface* rasterizer_) 
 }
 
 GPUVAddr MemoryManager::Map(GPUVAddr gpu_addr, DAddr dev_addr, std::size_t size, PTEKind kind, bool is_big_pages) {
-    if (is_big_pages)
-        return BigPageTableOp(gpu_addr, dev_addr, size, kind, EntryType::Mapped);
-    return PageTableOp(gpu_addr, dev_addr, size, kind, EntryType::Mapped);
+    const GPUVAddr result = is_big_pages
+                                ? BigPageTableOp(gpu_addr, dev_addr, size, kind, EntryType::Mapped)
+                                : PageTableOp(gpu_addr, dev_addr, size, kind, EntryType::Mapped);
+    const VideoCommon::GpuTrace::MapLog::Entry entry{
+        gpu_addr, gpu_addr + size, dev_addr, static_cast<u32>(kind), is_big_pages, false};
+    trace_maps.Map(entry);
+    VideoCommon::GpuTrace::NoteGmmuMap(*this, entry);
+    return result;
 }
 
 GPUVAddr MemoryManager::MapSparse(GPUVAddr gpu_addr, std::size_t size, bool is_big_pages) {
-    if (is_big_pages)
-        return BigPageTableOp(gpu_addr, 0, size, PTEKind::INVALID, EntryType::Reserved);
-    return PageTableOp(gpu_addr, 0, size, PTEKind::INVALID, EntryType::Reserved);
+    const GPUVAddr result =
+        is_big_pages
+            ? BigPageTableOp(gpu_addr, 0, size, PTEKind::INVALID, EntryType::Reserved)
+            : PageTableOp(gpu_addr, 0, size, PTEKind::INVALID, EntryType::Reserved);
+    const VideoCommon::GpuTrace::MapLog::Entry entry{
+        gpu_addr, gpu_addr + size, 0, static_cast<u32>(PTEKind::INVALID), is_big_pages, true};
+    trace_maps.Map(entry);
+    VideoCommon::GpuTrace::NoteGmmuMap(*this, entry);
+    return result;
 }
 
 void MemoryManager::Unmap(GPUVAddr gpu_addr, std::size_t size) {
@@ -262,6 +274,8 @@ void MemoryManager::Unmap(GPUVAddr gpu_addr, std::size_t size) {
 
     BigPageTableOp(gpu_addr, 0, size, PTEKind::INVALID, EntryType::Free);
     PageTableOp(gpu_addr, 0, size, PTEKind::INVALID, EntryType::Free);
+    trace_maps.Unmap(gpu_addr, gpu_addr + size);
+    VideoCommon::GpuTrace::NoteGmmuUnmap(*this, gpu_addr, size);
 }
 
 std::optional<DAddr> MemoryManager::GpuToCpuAddress(GPUVAddr gpu_addr) const {
@@ -1048,9 +1062,9 @@ bool MemoryManager::SubmappedRangeFromRuns(
 }
 
 // GetSubmappedRange and GetSubmappedDeviceRange answer from the map-time runs instead of walking
-// the range page by page, as MaxContinuousRange does: the texture cache, the buffer cache and
-// fast draws ask them for every image, buffer and draw they set up. EDEN_NX2_PERF_VERIFY=1 also
-// walks the pages, logs any difference and returns the walk's answer.
+// the range page by page, as MaxContinuousRange does: the buffer cache's virtual ranges, fast draws
+// and sparse images ask them for the ranges they bind.
+// EDEN_NX2_PERF_VERIFY=1 also walks the pages, logs any difference and returns the walk's answer.
 boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32>
 MemoryManager::GetSubmappedRange(GPUVAddr gpu_addr, std::size_t size) const {
     boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> result{};
@@ -1075,6 +1089,26 @@ MemoryManager::GetSubmappedRange(GPUVAddr gpu_addr, std::size_t size) const {
 
 boost::container::small_vector<std::pair<DAddr, std::size_t>, 32>
 MemoryManager::GetSubmappedDeviceRange(GPUVAddr gpu_addr, std::size_t size) const {
+    boost::container::small_vector<std::pair<DAddr, std::size_t>, 32> result{};
+    if (!IsWithinGPUAddressRange(gpu_addr)) {
+        return result;
+    }
+    size = (std::min<u64>)(size, address_space_size - gpu_addr);
+    if (!SubmappedRangeFromRuns<false>(gpu_addr, size, result)) {
+        GetSubmappedRangeImpl<false>(gpu_addr, size, result);
+    }
+    return result;
+}
+
+boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32>
+MemoryManager::GetSubmappedRangeUncached(GPUVAddr gpu_addr, std::size_t size) const {
+    boost::container::small_vector<std::pair<GPUVAddr, std::size_t>, 32> result{};
+    GetSubmappedRangeImpl<true>(gpu_addr, size, result);
+    return result;
+}
+
+boost::container::small_vector<std::pair<DAddr, std::size_t>, 32>
+MemoryManager::GetSubmappedDeviceRangeUncached(GPUVAddr gpu_addr, std::size_t size) const {
     boost::container::small_vector<std::pair<DAddr, std::size_t>, 32> result{};
     if (!IsWithinGPUAddressRange(gpu_addr)) {
         return result;

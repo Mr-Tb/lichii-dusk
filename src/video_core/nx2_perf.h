@@ -170,10 +170,6 @@ struct LiveState {
     int main_partner = -1;
     /// Per-pass GPU timing of one frame every 2 s (EDEN_NX2_PASS_TIMING; default The Duskbloods)
     int pass_timing = -1;
-    /// sysmix output queues up to 8 more blocks on the host, taken ahead from the guest ring, so
-    /// a late guest mixer does not run the host dry (EDEN_NX2_SYSMIX_AHEAD; default The
-    /// Duskbloods)
-    int sysmix_ahead = -1;
 
     [[nodiscard]] std::uint32_t Effective() const noexcept {
         return named | (verify ? VerifyMask : 0);
@@ -202,7 +198,6 @@ inline std::atomic<int> g_pin_strict{-1};
 inline std::atomic<int> g_pin_blit{-1};
 inline std::atomic<int> g_main_partner{-1};
 inline std::atomic<int> g_pass_timing{-1};
-inline std::atomic<int> g_sysmix_ahead{-1};
 /// Live changes requested / applied, and the rasterizer frame of the last applied one.
 inline std::atomic<std::uint64_t> g_live_requested{};
 inline std::atomic<std::uint64_t> g_live_applied{};
@@ -236,7 +231,6 @@ inline void StoreLive(const LiveState& state) {
     g_pin_blit.store(state.pin_blit, std::memory_order_relaxed);
     g_main_partner.store(state.main_partner, std::memory_order_relaxed);
     g_pass_timing.store(state.pass_timing, std::memory_order_relaxed);
-    g_sysmix_ahead.store(state.sysmix_ahead, std::memory_order_relaxed);
 }
 
 [[nodiscard]] inline LiveState CurrentLive() {
@@ -261,7 +255,6 @@ inline void StoreLive(const LiveState& state) {
         .pin_blit = g_pin_blit.load(std::memory_order_relaxed),
         .main_partner = g_main_partner.load(std::memory_order_relaxed),
         .pass_timing = g_pass_timing.load(std::memory_order_relaxed),
-        .sysmix_ahead = g_sysmix_ahead.load(std::memory_order_relaxed),
     };
 }
 
@@ -312,13 +305,13 @@ inline bool ApplyLive(std::uint64_t frame) {
              "frames_ahead={} fence_batch={} sync_submit={} alias={:#x} alias_sync={} "
              "dlss_tight={} dlss_hdr={} dlss_auto_exposure={} dlss_preset={} dusk_dlss_m={} "
              "rescale_pin={} pin_main={} pin_strict={} pin_blit={} "
-             "main_partner={} pass_timing={} sysmix_ahead={} sites: {}",
+             "main_partner={} pass_timing={} sites: {}",
              requested, frame, state.verify ? 1 : 0, state.dusk_off, state.uboreuse,
              state.frames_ahead, state.fence_batch, state.sync_submit, state.alias,
              state.alias_sync, state.dlss_tight, state.dlss_hdr, state.dlss_auto_exposure,
              state.dlss_preset, state.dusk_dlss_m, state.rescale_pin,
              state.pin_main, state.pin_strict, state.pin_blit, state.main_partner,
-             state.pass_timing, state.sysmix_ahead, SitesText(state.Effective()));
+             state.pass_timing, SitesText(state.Effective()));
     return true;
 }
 
@@ -362,8 +355,7 @@ inline void ReadSwitch() {
     }
     for (const auto& [name, field] : {std::pair{"EDEN_NX2_PIN_BLIT", &state.pin_blit},
                                       std::pair{"EDEN_NX2_MAIN_PARTNER", &state.main_partner},
-                                      std::pair{"EDEN_NX2_PASS_TIMING", &state.pass_timing},
-                                      std::pair{"EDEN_NX2_SYSMIX_AHEAD", &state.sysmix_ahead}}) {
+                                      std::pair{"EDEN_NX2_PASS_TIMING", &state.pass_timing}}) {
         if (const char* value = std::getenv(name); value && *value) {
             *field = value[0] == '1' ? 1 : 0;
         }

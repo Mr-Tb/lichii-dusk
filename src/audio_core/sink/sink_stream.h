@@ -89,13 +89,8 @@ public:
 
     virtual bool TryAppendOutputBlock(SinkBuffer& buffer, std::span<s16> samples);
 
-    u32 SysmixQueueLimit() const;
-
-    /// Blocks a sysmix stream may queue beyond SysmixQueueLimit's minimum (taken ahead from the
-    /// guest ring so a late guest mixer does not run the host dry).
-    void SetSysmixExtraBlocks(u32 blocks) {
-        sysmix_extra_blocks.store(blocks, std::memory_order_relaxed);
-    }
+    /// Bound queued sysmix blocks; discard sinks use one to preserve the timer cadence.
+    virtual u32 SysmixQueueLimit() const;
 
     /**
      * Check if the stream is paused.
@@ -296,11 +291,14 @@ private:
     /// EDEN_NX2_AUDIO_LEVEL meter state.
     s32 level_peak{};
     u64 level_frames{};
+    u64 level_rendered_frames{};
+    u64 level_callbacks{};
+    u64 level_underrun_callbacks{};
+    u64 level_max_missing_frames{};
     /// Number of buffers waiting to be played
     std::atomic<u32> queued_buffers{};
     /// Largest number of frames the host device has asked for in one callback (sysmix streams)
     std::atomic<u64> largest_request_frames{};
-    std::atomic<u32> sysmix_extra_blocks{};
     /// The ring size for audio out buffers (usually 4, rarely 2 or 8)
     u32 max_queue_size{};
     /// Locks access to sample count tracking info
