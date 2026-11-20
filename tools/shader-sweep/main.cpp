@@ -1346,7 +1346,8 @@ int main(int argc, char** argv) {
             if (arg == "--help") {
                 std::cout << "shader-sweep [INPUT] [--stage "
                              "vertex|tess-control|tess-eval|geometry|fragment|compute|task|mesh]\n"
-                             "  [--format instructions|native-header] [--environment FILE "
+                             "  [--format instructions|native-header] [--program-id HEX] "
+                             "[--environment FILE "
                              "--cache-version 46..54]\n"
                              "  [--guess-missing [--guess-cbuf0 HEX] [--guess-cbuf-other HEX]\n"
                              "   [--guess-texture-type N] [--guess-pixel-format N] "
@@ -1384,6 +1385,8 @@ int main(int argc, char** argv) {
                 format = value;
             else if (arg == "--environment")
                 environment = value;
+            else if (arg == "--program-id") // title gates, e.g. 0400D1D02399A000
+                Settings::SetCurrentProgramID(std::stoull(value, nullptr, 16));
             else if (arg == "--override-out")
                 override_out = value;
             else if (arg == "--pipeline-key")

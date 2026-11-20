@@ -91,6 +91,17 @@ public:
         return IsNativeProgram() && Settings::GetCurrentProgramID() == 0x0400D1D02399A000ULL;
     }
 
+    /// The Duskbloods' native loads through exactly one pointer loaded from memory index that
+    /// buffer directly, instead of a run-time search over the bound buffers.
+    /// EDEN_NX2_DUSK_LOADED_REBASE=0 turns it off.
+    [[nodiscard]] bool RebasesLoadedPointers() const {
+        static const bool enabled = [] {
+            const char* value = std::getenv("EDEN_NX2_DUSK_LOADED_REBASE");
+            return value == nullptr || value[0] != '0';
+        }();
+        return enabled && UsesNativeLocalStack();
+    }
+
     /// Native programs: whether the 8-byte constant at (index, offset) is a mapped GPU address.
     /// Native argument tables mix pointers with scalars (sizes, strides).
     [[nodiscard]] virtual bool IsCbufStorageBufferPointer(u32, u32) { return true; }

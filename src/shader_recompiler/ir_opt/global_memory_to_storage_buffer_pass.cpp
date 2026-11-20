@@ -24,6 +24,7 @@
 #include "shader_recompiler/frontend/ir/ir_emitter.h"
 #include "shader_recompiler/frontend/ir/value.h"
 #include "shader_recompiler/host_translate_info.h"
+#include "shader_recompiler/ir_opt/dominance.h"
 #include "shader_recompiler/ir_opt/passes.h"
 #include "shader_recompiler/storage_write_extent.h"
 
@@ -44,6 +45,9 @@ struct StorageInst {
     StorageBufferAddr storage_buffer;
     IR::Inst* inst;
     IR::Block* block;
+    /// The low word of the pointer the buffer's base was loaded as (indirect buffers), see
+    /// NativeCandidates::loaded_low
+    IR::Inst* loaded_low{};
 };
 
 /// Bias towards a certain range of constant buffers when looking for storage buffers
@@ -80,6 +84,11 @@ struct NativeCandidates {
     bool complete{};
     /// The access block the table holder search left phi inputs out for (see AllowsPhi)
     const IR::Block* pruned_at{};
+    /// Set when the address is built, through additions alone, from one pointer loaded from a
+    /// constant buffer pointer's memory: the low word of that loaded pointer.
+    IR::Inst* loaded_low{};
+    /// As complete, leaving out the phi inputs the access's conditions rule out (with loaded_low)
+    bool loaded_complete{};
 };
 
 /// A global access left for the backend to route among its own candidate buffers
@@ -133,6 +142,8 @@ struct StorageInfo {
     StorageBufferSet unbounded_writes;
     /// A store or atomic stayed global without a buffer: it may land in any written buffer
     bool untracked_writes{};
+    /// Set while loads through one loaded pointer are rebased (Environment::RebasesLoadedPointers)
+    const Dominance* dominance{};
 };
 
 /// Returns true when the instruction is a global memory instruction
@@ -1239,6 +1250,10 @@ NativeCandidates NativePointerCandidates(const IR::U32& low_addr, Environment& e
     }
     small_vector<const IR::Inst*, 16> pending{low_addr.InstRecursive()};
     std::unordered_set<const IR::Inst*> visited{pending.front()};
+    // For loaded_low: the 64-bit loads reached, and the one read through a constant buffer
+    // pointer directly.
+    size_t loads{};
+    const IR::Inst* direct_load{};
     const auto enqueue = [&](const IR::Value& value) {
         if (!value.IsImmediate() && visited.insert(value.InstRecursive()).second) {
             pending.push_back(value.InstRecursive());
@@ -1308,6 +1323,7 @@ NativeCandidates NativePointerCandidates(const IR::U32& low_addr, Environment& e
             }
             break;
         case IR::Opcode::LoadGlobal64: {
+            ++loads;
             // A pointer loaded from the memory a constant buffer pointer points to (the binding
             // reads it again for every dispatch and draw).
             // The table address: a tracked low word, or a constant buffer pointer packed whole.
@@ -1443,6 +1459,9 @@ NativeCandidates NativePointerCandidates(const IR::U32& low_addr, Environment& e
                     if (Common::IsAligned(pointer.offset, 8) &&
                         env.IsCbufStorageBufferPointer(pointer.index, pointer.offset)) {
                         add(pointer, via_phi || !holder_addr);
+                        if (!via_phi && holder_addr) {
+                            direct_load = inst;
+                        }
                     } else {
                         table_complete = false;
                     }
@@ -1479,51 +1498,124 @@ NativeCandidates NativePointerCandidates(const IR::U32& low_addr, Environment& e
     }
     // The pointer is in one input of an addition (the others are offsets), in every input of a phi
     // or select. A greatest fixed point: a phi reached again through a loop is complete when the
-    // values entering the loop are.
-    std::unordered_map<const IR::Inst*, bool> complete;
-    for (const IR::Inst* const inst : pending) {
-        complete.emplace(inst, true);
-    }
-    const auto is_complete = [&](const IR::Value& value) {
-        return !value.IsImmediate() && complete.at(value.InstRecursive());
-    };
-    for (bool changed{true}; changed;) {
-        changed = false;
+    // values entering the loop are. With `prune`, phi inputs the access's conditions rule out are
+    // left out.
+    const auto completeness = [&](bool prune) {
+        std::unordered_map<const IR::Inst*, bool> complete;
         for (const IR::Inst* const inst : pending) {
-            bool value{};
+            complete.emplace(inst, true);
+        }
+        const auto is_complete = [&](const IR::Value& value) {
+            return !value.IsImmediate() && complete.at(value.InstRecursive());
+        };
+        for (bool changed{true}; changed;) {
+            changed = false;
+            for (const IR::Inst* const inst : pending) {
+                bool value{};
+                switch (inst->GetOpcode()) {
+                case IR::Opcode::IAdd32:
+                    value = is_complete(inst->Arg(0)) || is_complete(inst->Arg(1));
+                    break;
+                case IR::Opcode::Phi:
+                    value = true;
+                    for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+                        value &= is_complete(inst->Arg(arg)) ||
+                                 (prune && !conditions.AllowsPhi(inst, arg));
+                    }
+                    break;
+                case IR::Opcode::SelectU32:
+                    value = is_complete(inst->Arg(1)) && is_complete(inst->Arg(2));
+                    break;
+                case IR::Opcode::ShuffleIndex:
+                    value = is_complete(inst->Arg(0));
+                    break;
+                case IR::Opcode::CompositeExtractU32x2:
+                    value = inst->Arg(1).IsImmediate() && inst->Arg(1).U32() == 0 &&
+                            is_complete(inst->Arg(0));
+                    break;
+                default: {
+                    const auto source{sources.find(inst)};
+                    value = source != sources.end() && source->second;
+                    break;
+                }
+                }
+                if (value != complete[inst]) {
+                    complete[inst] = value;
+                    changed = true;
+                }
+            }
+        }
+        return complete.at(low_addr.InstRecursive());
+    };
+    result.complete = completeness(false);
+    if (loads == 1 && direct_load && !result.pruned_at) {
+        // The loaded pointer's low word reaches the address through additions, phis that carry
+        // it unchanged around a loop, and phis whose other inputs the access's conditions rule
+        // out (offsets may come through any phi). CollectStorageBuffers checks it dominates the
+        // access.
+        small_vector<const IR::Inst*, 16> adds{low_addr.InstRecursive()};
+        std::unordered_set<const IR::Inst*> added;
+        small_vector<const IR::Inst*, 2> low_words;
+        bool pruned{};
+        while (!adds.empty()) {
+            const IR::Inst* const inst{adds.back()};
+            adds.pop_back();
+            if (!added.insert(inst).second) {
+                continue;
+            }
             switch (inst->GetOpcode()) {
             case IR::Opcode::IAdd32:
-                value = is_complete(inst->Arg(0)) || is_complete(inst->Arg(1));
-                break;
-            case IR::Opcode::Phi:
-                value = true;
-                for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
-                    value &= is_complete(inst->Arg(arg));
+                for (size_t arg = 0; arg < 2; ++arg) {
+                    if (!inst->Arg(arg).IsImmediate()) {
+                        adds.push_back(inst->Arg(arg).InstRecursive());
+                    }
                 }
                 break;
-            case IR::Opcode::SelectU32:
-                value = is_complete(inst->Arg(1)) && is_complete(inst->Arg(2));
+            case IR::Opcode::Phi: {
+                const IR::Inst* input{};
+                for (size_t arg = 0; arg < inst->NumArgs(); ++arg) {
+                    if (!conditions.AllowsPhi(inst, arg)) {
+                        pruned = true;
+                        continue;
+                    }
+                    const IR::Value value{inst->Arg(arg)};
+                    if (!value.IsImmediate() && value.InstRecursive() == inst) {
+                        continue;
+                    }
+                    if (value.IsImmediate() || (input && input != value.InstRecursive())) {
+                        // A phi of other values: an offset, or several pointers
+                        input = nullptr;
+                        break;
+                    }
+                    input = value.InstRecursive();
+                }
+                if (input) {
+                    adds.push_back(input);
+                }
                 break;
-            case IR::Opcode::ShuffleIndex:
-                value = is_complete(inst->Arg(0));
-                break;
+            }
             case IR::Opcode::CompositeExtractU32x2:
-                value = inst->Arg(1).IsImmediate() && inst->Arg(1).U32() == 0 &&
-                        is_complete(inst->Arg(0));
+                if (inst->Arg(1).IsImmediate() && inst->Arg(1).U32() == 0 &&
+                    !inst->Arg(0).IsImmediate() &&
+                    inst->Arg(0).InstRecursive()->GetOpcode() == IR::Opcode::LoadGlobal64) {
+                    low_words.push_back(inst);
+                }
                 break;
-            default: {
-                const auto source{sources.find(inst)};
-                value = source != sources.end() && source->second;
+            default:
                 break;
             }
-            }
-            if (value != complete[inst]) {
-                complete[inst] = value;
-                changed = true;
+        }
+        if (low_words.size() == 1 && low_words.front()->Arg(0).InstRecursive() == direct_load) {
+            result.loaded_low = const_cast<IR::Inst*>(low_words.front());
+            if (pruned) {
+                // Searched under this access's conditions
+                result.pruned_at = conditions.current;
+                result.loaded_complete = completeness(true);
+            } else {
+                result.loaded_complete = result.complete;
             }
         }
     }
-    result.complete = complete.at(low_addr.InstRecursive());
     return result;
 }
 
@@ -1586,6 +1678,22 @@ bool CollectStorageBuffers(IR::Block& block, IR::Inst& inst, StorageInfo& info, 
             (!has_loaded_pointer || !info.bind_competing_loaded || !IsRuntimeRoutable(inst))) {
             // No pointer loaded from memory competes with the paired one, or the access cannot
             // stay global: keep the pair.
+        } else if (!paired_found && it->second.loaded_low && candidates.size() == 1 &&
+                   candidates.front().indirect != ~0U && it->second.loaded_complete &&
+                   it->second.arrays.empty() && !IsGlobalMemoryWrite(inst) &&
+                   std::ranges::find(info.table_candidates, candidates.front()) ==
+                       info.table_candidates.end() &&
+                   info.dominance && info.dominance->Dominates(it->second.loaded_low, &inst)) {
+            // The binding is the pointer the access loaded, so its base is that pointer aligned
+            // down (as BindGraphicsStorageBuffer binds it): index it directly.
+            info.set.insert(candidates.front());
+            info.to_replace.push_back(StorageInst{
+                .storage_buffer{candidates.front()},
+                .inst = &inst,
+                .block = &block,
+                .loaded_low = it->second.loaded_low,
+            });
+            return true;
         } else if (candidates.size() > 1 || paired_found ||
                    (!candidates.empty() && info.native_dynamic.contains(start))) {
             // Bind every candidate and keep the access global; the backend picks the buffer at
@@ -2170,7 +2278,8 @@ private:
 };
 
 /// Returns the offset in indices (not bytes) for an equivalent storage instruction
-IR::U32 StorageOffset(IR::Block& block, IR::Inst& inst, StorageBufferAddr buffer, u32 alignment) {
+IR::U32 StorageOffset(IR::Block& block, IR::Inst& inst, StorageBufferAddr buffer, u32 alignment,
+                      IR::Inst* loaded_low) {
     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
     IR::U32 offset;
     if (const std::optional<LowAddrInfo> low_addr{TrackLowAddress(&inst)}) {
@@ -2183,7 +2292,8 @@ IR::U32 StorageOffset(IR::Block& block, IR::Inst& inst, StorageBufferAddr buffer
     }
     // Subtract the least significant 32 bits from the guest offset. The result is the storage
     // buffer offset in bytes.
-    IR::U32 low_cbuf{ir.GetCbuf(ir.Imm32(buffer.index), ir.Imm32(buffer.offset))};
+    IR::U32 low_cbuf{loaded_low ? IR::U32{IR::Value{loaded_low}}
+                                : ir.GetCbuf(ir.Imm32(buffer.index), ir.Imm32(buffer.offset))};
 
     // Align the offset base to match the host alignment requirements
     low_cbuf = ir.BitwiseAnd(low_cbuf, ir.Imm32(~(alignment - 1U)));
@@ -2310,7 +2420,12 @@ void GlobalMemoryToStorageBufferPass(Environment& env, IR::Program& program,
     info.bind_competing_loaded = host_info.support_int64;
     info.iterator_words = CollectIteratorWords(program);
     info.atomic_pointers = CollectAtomicPointers(program);
+    std::optional<Dominance> dominance;
+    if (env.IsNativeProgram() && env.RebasesLoadedPointers()) {
+        dominance.emplace(program);
+    }
     const auto collect = [&] {
+        info.dominance = dominance ? &*dominance : nullptr;
         for (IR::Block* const block : program.post_order_blocks) {
             for (IR::Inst& inst : block->Instructions()) {
                 if (!IsGlobalMemory(inst)) {
@@ -2428,7 +2543,8 @@ void GlobalMemoryToStorageBufferPass(Environment& env, IR::Program& program,
         IR::Block* const block{storage_inst.block};
         IR::Inst* const inst{storage_inst.inst};
         const IR::U32 offset{
-            StorageOffset(*block, *inst, storage_buffer, u32(host_info.min_ssbo_alignment))};
+            StorageOffset(*block, *inst, storage_buffer, u32(host_info.min_ssbo_alignment),
+                          storage_inst.loaded_low)};
         Replace(*block, *inst, index, offset);
     }
 }
