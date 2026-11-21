@@ -8,6 +8,8 @@
 
 # Lichii for The Duskbloods (Network Test)
 
+# ⚠️ Launcher not included: [download it here](https://github.com/sikoGD/playDB-CNT/releases/latest) / المشغّل غير مرفق: [حمّله من هنا](https://github.com/sikoGD/playDB-CNT/releases/latest)
+
 <p align="center"><b>Choose your language / اختر اللغة</b></p>
 
 <a id="english"></a>
@@ -15,9 +17,22 @@
 <summary><b>English: open the guide</b></summary>
 
 **This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, newest upstream after build 341), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs.**
-It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher (1.3.2) is included in the zip.
+It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher is a separate download: see the two boxes below.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
+
+# ⚠️ The launcher is NOT in the zip: download it separately
+
+### ➡️ [Download `Play.Duskbloods.exe` from the playDB-CNT releases](https://github.com/sikoGD/playDB-CNT/releases/latest)
+
+Put `Play.Duskbloods.exe` in the same folder as `lichii.exe`, then follow [Launcher setup](#launcher-setup).
+
+# 🛡️ Windows Defender may call the launcher a virus: it is a false positive
+
+- **What you may see:** Windows Defender blocks or deletes `Play.Duskbloods.exe` with a name like `Trojan:Win32/Wacatac.B!ml`.
+- **Why it happens:** the launcher is a Python program packed into a single exe with PyInstaller. When it starts, it unpacks itself and then runs, and the exe is not digitally signed. Real malware is often packed the same way, so Defender's automatic guesswork flags it. The `!ml` at the end means "machine learning": a guess based on how the file looks, not a match with any known virus.
+- **Why we are sure it is a false positive:** every launcher version we scanned (1.3.2, 1.4.0 and 1.5.0) gets the same guess, and on some days the very same file scans clean. The launcher's source code is public in [its repository](https://github.com/sikoGD/playDB-CNT). `lichii.exe` and everything else in our zip scan clean. That is why the launcher is no longer bundled: it made our whole zip look infected.
+- **How to keep it:** open **Windows Security > Virus & threat protection > Protection history**, select the launcher entry, then **Actions > Allow** (or **Restore**). Do this only for the file you downloaded from the official playDB-CNT releases page.
 
 ## What's new in v4
 
@@ -25,7 +40,7 @@ It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by
 - **Much faster lighting:** the game's lighting shader, the heaviest part of each frame, now reads its light data directly instead of searching every buffer for it. Our own fix, for every GPU. At 2x on an RTX 3060: **30.4 → 39.4 fps**.
 - **Shorter GPU waits:** the texture cache writes back at most one GPU-drawn image per frame with a full GPU wait; the rest wait a frame. **39.5 → 43.3 fps** in game, better 1% lows, and less texture churn when memory runs low.
 - **Online fix** for the newer upstream base: its IPv6 connections now reach the launcher's servers (error 2321-4992 otherwise).
-- **Launcher playDB-CNT 1.3.2** included. On 2026-11-20 the zip went back from launcher 1.5.0 to 1.3.2, because Windows Defender flagged the zip.
+- **The launcher is now a separate download.** Windows Defender kept flagging it by mistake, and with it our whole zip (see the warning at the top).
 - **For bug reports:** when the game closes, the log ends with an `Nx2Summary run` line (average fps, 1% and 0.1% lows), and the GPU's busy share is logged once a second.
 
 ## Performance
@@ -84,27 +99,28 @@ You need:
 - Your own `prod.keys` and `title.keys`
 - Your own Switch 2 firmware dump (tested with 23.0.1)
 - Your own dump of *The Duskbloods Network Test*
-- The **[playDB-CNT launcher](https://github.com/sikoGD/playDB-CNT)** (`Play.Duskbloods.exe`, included in the zip). See [Launcher setup](#launcher-setup) below.
+- The **[playDB-CNT launcher](https://github.com/sikoGD/playDB-CNT)** (`Play.Duskbloods.exe`), **a separate download** from [its releases](https://github.com/sikoGD/playDB-CNT/releases/latest). See [Launcher setup](#launcher-setup) below.
 
 Steps:
 
 1. **Extract** `Lichii-Duskbloods.zip` to a folder with a short path, e.g. `C:\Games\Lichii-Duskbloods\`. Keep the `user` folder next to `lichii.exe`: it makes the emulator portable and already holds the tuned settings.
 2. **Keys:** copy `prod.keys` and `title.keys` into `user\keys\`. Or start `lichii.exe` and use **Tools > Install Decryption Keys**.
 3. **Firmware and first start:** start `lichii.exe`, then **Tools > Install Firmware > From Folder** (or **From ZIP**) and pick your firmware dump. Close the emulator afterwards. This first start also writes the emulator's full settings, which the launcher needs.
-4. **Launcher:** set it up as described in [Launcher setup](#launcher-setup) below.
+4. **Launcher:** [download `Play.Duskbloods.exe`](https://github.com/sikoGD/playDB-CNT/releases/latest), put it next to `lichii.exe`, and set it up as described in [Launcher setup](#launcher-setup) below.
 5. **Play:** press **Start game** in `Play.Duskbloods.exe`. Always start the game through the launcher: started any other way, the game has no servers and stops at an online connection message.
 
 **Updating from v3:** extract v4 into a new folder and copy your old `user` folder over it (keys, firmware, saves). The first minutes stutter while shaders rebuild for the new version.
 
 ## Launcher setup
 
-`Play.Duskbloods.exe` (playDB-CNT 1.3.2) sits in the zip next to `lichii.exe`. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
+Download `Play.Duskbloods.exe` from [the playDB-CNT releases](https://github.com/sikoGD/playDB-CNT/releases/latest) and put it next to `lichii.exe`. If Windows Defender blocks it, see the false-positive note at the top. You set everything in its window. It saves your choices to `launcher_settings.json` by itself when you press **Start game**, so do not edit that file by hand. No admin rights, hosts file or certificate steps are needed.
 
 1. Run `Play.Duskbloods.exe`.
 2. **Setup tab > Game:** press **Folder** and pick the unpacked `THE DUSKBLOODS NETWORK TEST VER` folder (the one with `base\exefs\main`), or **Browse** for a `.nup` file. It must say *The Duskbloods network test found*. A game folder in or next to the Lichii folder is found automatically.
 3. **Setup tab > Emulator:** choose `Lichii - <folder name>` (this `lichii.exe`; it is selected automatically when the launcher sits next to it). No red *No Duskbloods online support* note may show. Do not press any **Patch** button: this build has the online support built in.
 4. **Online tab:** keep **Just me** (the default). **Host a room** and **Join a room** are online tests with friends, and their matches do not start yet.
-5. Press **Start game** and keep the launcher open while you play.
+5. **Mods tab** (launcher 1.5.0 and newer): keep **Bot Match** and **CPU player names** on; untick the experimental mods for normal play.
+6. Press **Start game** and keep the launcher open while you play.
 
 *Just me* needs no firewall change: everything stays on 127.0.0.1. To host or join a room, allow the launcher and `lichii.exe` through Windows Firewall when Windows asks.
 
@@ -138,7 +154,7 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
 - Brightness flicker or texture pop-in can appear when the PC runs low on memory (RAM plus page file). Close browsers and other heavy programs before playing.
 - The first launch stutters while shaders rebuild for the new version.
 - AMD and Intel GPUs are untested.
-- Some Windows antivirus programs flagged launchers 1.4.0 and 1.5.0 by mistake, so the zip ships 1.3.2. If yours flags it, restore it from quarantine or get it from [the launcher's releases](https://github.com/sikoGD/playDB-CNT/releases).
+- Windows Defender may flag the launcher by mistake. It is a false positive: see the warning at the top of this guide.
 - DLSS needs an RTX card and a one-time download of NVIDIA's files.
 
 ## Troubleshooting
@@ -183,9 +199,22 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 <div dir="rtl">
 
 **هذا المشروع نسخة معدّلة (fork) من [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2، أحدث نسخة بعد الإصدار 341)، ومحسّنة لتشغيل *The Duskbloods Network Test* (رقم البرنامج `0400D1D02399A000`) على أجهزة Windows.**
-يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل (الإصدار 1.3.2) موجود داخل الملف المضغوط.
+يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل يُحمَّل بشكل منفصل: انظر المربّعين بالأسفل.
 
 > المشروع غير تابع لـ Nintendo أو FromSoftware أو المشاريع الأصلية. لا يتضمن أي ألعاب أو مفاتيح أو firmware. استخدم فقط ملفات استخرجتها بنفسك بطريقة قانونية.
+
+# ⚠️ المشغّل غير موجود في الملف المضغوط: حمّله بشكل منفصل
+
+### ➡️ [حمّل `Play.Duskbloods.exe` من صفحة إصدارات playDB-CNT](https://github.com/sikoGD/playDB-CNT/releases/latest)
+
+ضع `Play.Duskbloods.exe` في نفس مجلد `lichii.exe`، ثم اتبع قسم [إعداد المشغّل](#إعداد-المشغّل).
+
+# 🛡️ قد يعتبر Windows Defender المشغّل فيروسًا: هذا إنذار كاذب
+
+- **ما قد تراه:** يحظر Windows Defender الملف `Play.Duskbloods.exe` أو يحذفه باسم مثل `Trojan:Win32/Wacatac.B!ml`.
+- **لماذا يحدث هذا:** المشغّل برنامج مكتوب بلغة Python ومحزوم في ملف exe واحد بأداة PyInstaller. عند تشغيله يفكّ نفسه ثم يعمل، والملف غير موقّع رقميًا. كثير من البرامج الضارة تُحزم بنفس الطريقة، لذلك يشتبه به التخمين الآلي في Defender. الجزء `!ml` في آخر الاسم يعني "تعلّم آلي": أي تخمين مبني على شكل الملف، وليس تطابقًا مع فيروس معروف.
+- **لماذا نحن متأكدون أنه إنذار كاذب:** كل إصدارات المشغّل التي فحصناها (1.3.2 و1.4.0 و1.5.0) تحصل على نفس التخمين، وفي بعض الأيام ينجح فحص الملف نفسه دون أي تحذير. الكود المصدري للمشغّل منشور في [مستودعه](https://github.com/sikoGD/playDB-CNT). الملف `lichii.exe` وباقي محتويات ملفنا المضغوط نظيفة في الفحص، ولهذا لم نعد نضع المشغّل داخله: كان يجعل الملف المضغوط كله يبدو مصابًا.
+- **كيف تحتفظ به:** افتح **Windows Security > Virus & threat protection > Protection history**، واختر سجل المشغّل، ثم **Actions > Allow** (أو **Restore**). افعل ذلك فقط للملف الذي حمّلته من صفحة إصدارات playDB-CNT الرسمية.
 
 ## الجديد في الإصدار الرابع
 
@@ -193,7 +222,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - **إضاءة أسرع بكثير:** الـ shader الخاص بالإضاءة، وهو أثقل جزء في كل إطار، صار يقرأ بيانات الأضواء مباشرة بدل البحث عنها في كل ذاكرة مربوطة. هذا إصلاحنا الخاص ويفيد كل كروت الشاشة. على RTX 3060 بدقة 2x: **من 30.4 إلى 39.4 إطار/ثانية**.
 - **انتظار أقل لكرت الشاشة:** ذاكرة الصور تعيد كتابة صورة واحدة على الأكثر في كل إطار مع انتظار كامل لكرت الشاشة، والباقي ينتظر الإطار التالي. **من 39.5 إلى 43.3 إطار/ثانية** داخل اللعب، وأدنى إطارات (1% low) أفضل، وتبديل أقل للصور عندما تقلّ الذاكرة.
 - **إصلاح الاتصال** للنسخة الأصلية الجديدة: اتصالات IPv6 صارت تصل إلى خوادم المشغّل (وإلا يظهر الخطأ 2321-4992).
-- **مشغّل playDB-CNT الإصدار 1.3.2** مرفق. في 2026-11-20 أعدنا المشغّل في الملف المضغوط من 1.5.0 إلى 1.3.2، لأن Windows Defender صنّف الملف المضغوط كتهديد.
+- **المشغّل صار يُحمَّل بشكل منفصل.** كان Windows Defender يصنّفه كتهديد بالخطأ، ومعه ملفنا المضغوط كله (انظر التحذير في الأعلى).
 - **لتقارير المشاكل:** عند إغلاق اللعبة ينتهي السجلّ بسطر `Nx2Summary run` (متوسط الإطارات وأدنى 1% و0.1%)، ونسبة انشغال كرت الشاشة تُسجَّل كل ثانية.
 
 ## الأداء
@@ -252,27 +281,28 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - ملفّي `prod.keys` و`title.keys` الخاصين بك
 - نسخة firmware خاصة بك من Switch 2 (تمّت التجربة على 23.0.1)
 - نسختك من *The Duskbloods Network Test*
-- **[مشغّل playDB-CNT](https://github.com/sikoGD/playDB-CNT)** ‏(`Play.Duskbloods.exe`، موجود داخل الملف المضغوط). طريقة إعداده في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل
+- **[مشغّل playDB-CNT](https://github.com/sikoGD/playDB-CNT)** ‏(`Play.Duskbloods.exe`)، **يُحمَّل بشكل منفصل** من [صفحة إصداراته](https://github.com/sikoGD/playDB-CNT/releases/latest). طريقة إعداده في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل
 
 الخطوات:
 
 1. **فكّ الضغط** عن `Lichii-Duskbloods.zip` في مجلد بمسار قصير، مثل `C:\Games\Lichii-Duskbloods\`. أبقِ مجلد `user` بجانب `lichii.exe`: فهو يجعل المحاكي محمولًا ويحتوي على الإعدادات المحسّنة.
 2. **المفاتيح:** انسخ `prod.keys` و`title.keys` إلى `user\keys\`، أو شغّل `lichii.exe` واختر **Tools > Install Decryption Keys**.
 3. **الـ Firmware وأول تشغيل:** شغّل `lichii.exe`، ثم اختر **Tools > Install Firmware > From Folder** (أو **From ZIP**) وحدّد ملفات الـ firmware، ثم أغلق المحاكي. هذا التشغيل الأول يكتب أيضًا كل إعدادات المحاكي، والمشغّل يحتاج إليها.
-4. **المشغّل:** جهّزه كما في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل.
+4. **المشغّل:** [حمّل `Play.Duskbloods.exe`](https://github.com/sikoGD/playDB-CNT/releases/latest) وضعه بجانب `lichii.exe`، ثم جهّزه كما في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل.
 5. **اللعب:** اضغط **Start game** في `Play.Duskbloods.exe`. شغّل اللعبة دائمًا من المشغّل، فإذا شغّلتها بأي طريقة أخرى لن تجد أي خوادم، وستتوقف عند رسالة تطلب الاتصال بالإنترنت.
 
 **التحديث من الإصدار الثالث:** فكّ ضغط الإصدار الرابع في مجلد جديد، ثم انسخ مجلد `user` القديم فوقه (المفاتيح والـ firmware وملفات الحفظ). في الدقائق الأولى قد يحدث تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
 
 ## إعداد المشغّل
 
-المشغّل `Play.Duskbloods.exe` ‏(playDB-CNT 1.3.2) موجود في الملف المضغوط بجانب `lichii.exe`، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
+حمّل المشغّل `Play.Duskbloods.exe` من [صفحة إصدارات playDB-CNT](https://github.com/sikoGD/playDB-CNT/releases/latest) وضعه بجانب `lichii.exe` (وإذا حظره Windows Defender فانظر ملاحظة الإنذار الكاذب في الأعلى)، وكل إعداداته تتم من نافذته. هو يحفظ اختياراتك بنفسه في `launcher_settings.json` عند الضغط على **Start game**، فلا تعدّل هذا الملف يدويًا. لا تحتاج إلى صلاحيات المسؤول (admin)، ولا إلى تعديل ملف hosts أو تثبيت أي شهادات.
 
 1. شغّل `Play.Duskbloods.exe`.
 2. **تبويب Setup > Game:** اضغط **Folder** واختر مجلد اللعبة `THE DUSKBLOODS NETWORK TEST VER` (الذي يحتوي على `base\exefs\main`)، أو اضغط **Browse** لاختيار ملف `.nup`. يجب أن تظهر العبارة *The Duskbloods network test found*. إذا كان مجلد اللعبة داخل مجلد Lichii أو بجانبه، يجده المشغّل تلقائيًا.
 3. **تبويب Setup > Emulator:** اختر `Lichii - <اسم المجلد>` (أي `lichii.exe` هذا، ويُختار تلقائيًا إذا كان المشغّل بجانبه). يجب ألّا تظهر الملاحظة الحمراء *No Duskbloods online support*. لا تضغط أي زر **Patch**، فهذه النسخة تدعم الاتصال أصلًا.
 4. **تبويب Online:** اترك **Just me** (الخيار الافتراضي). أما **Host a room** و**Join a room** فهما لتجارب اللعب مع الأصدقاء، والمباريات فيهما لا تبدأ بعد.
-5. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
+5. **تبويب Mods** (في المشغّل 1.5.0 وما بعده): أبقِ **Bot Match** و**CPU player names** مفعّلين، وألغِ تفعيل الإضافات التجريبية في اللعب العادي.
+6. اضغط **Start game**، وأبقِ المشغّل مفتوحًا أثناء اللعب.
 
 وضع *Just me* لا يحتاج أي تغيير في جدار الحماية (Firewall)، فكل شيء يبقى على 127.0.0.1. لاستضافة غرفة أو الانضمام إليها، اسمح للمشغّل ولـ `lichii.exe` بالمرور عبر جدار حماية Windows عندما يطلب Windows ذلك.
 
@@ -306,7 +336,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - قد يظهر وميض في الإضاءة أو ظهور متأخر للصور عندما تقلّ ذاكرة الجهاز (الرام مع ملف الصفحات). أغلق المتصفحات والبرامج الثقيلة قبل اللعب.
 - أول تشغيل فيه تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
 - كروت AMD وIntel لم تُجرَّب.
-- بعض برامج الحماية في Windows صنّفت المشغّلين 1.4.0 و1.5.0 كتهديد بالخطأ، لذلك يأتي الملف المضغوط مع 1.3.2. إذا حجزه برنامج الحماية لديك، استرجعه من الحجر أو حمّله من [إصدارات المشغّل](https://github.com/sikoGD/playDB-CNT/releases).
+- قد يصنّف Windows Defender المشغّل كتهديد بالخطأ. هذا إنذار كاذب: انظر التحذير في أعلى هذا الدليل.
 - DLSS يحتاج كرت RTX وتحميل ملفات NVIDIA مرة واحدة.
 
 ## حل المشاكل
