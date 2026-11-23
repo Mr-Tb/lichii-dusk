@@ -8,9 +8,9 @@
 
 # Lichii for The Duskbloods (Network Test)
 
-# ⚠️ Launcher not included: [download it here](https://github.com/sikoGD/playDB-CNT/releases/latest) / المشغّل غير مرفق: [حمّله من هنا](https://github.com/sikoGD/playDB-CNT/releases/latest)
+### ⚠️ Launcher not included: [download it here](https://github.com/sikoGD/playDB-CNT/releases/latest)
 
-<p align="center"><b>Choose your language / اختر اللغة</b></p>
+<p align="center"><b>العربية بالأسفل</b></p>
 
 <a id="english"></a>
 <details name="lang" open>
