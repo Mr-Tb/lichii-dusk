@@ -8,9 +8,9 @@
 
 # Lichii for The Duskbloods (Network Test)
 
-# ⚠️ Launcher not included: [download it here](https://github.com/sikoGD/playDB-CNT/releases/latest) / المشغّل غير مرفق: [حمّله من هنا](https://github.com/sikoGD/playDB-CNT/releases/latest)
+### ⚠️ Launcher not included: [download it here](https://github.com/sikoGD/playDB-CNT/releases/latest)
 
-<p align="center"><b>Choose your language / اختر اللغة</b></p>
+<p align="center"><b>العربية بالأسفل</b></p>
 
 <a id="english"></a>
 <details name="lang" open>
@@ -20,19 +20,10 @@
 It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher is a separate download: see the two boxes below.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
-
-# ⚠️ The launcher is NOT in the zip: download it separately
-
-### ➡️ [Download `Play.Duskbloods.exe` from the playDB-CNT releases](https://github.com/sikoGD/playDB-CNT/releases/latest)
+⚠️ The launcher is NOT in the zip: download it separately
+ ➡️ [Download `Play.Duskbloods.exe` from the playDB-CNT releases](https://github.com/sikoGD/playDB-CNT/releases/latest)
 
 Put `Play.Duskbloods.exe` in the same folder as `lichii.exe`, then follow [Launcher setup](#launcher-setup).
-
-# 🛡️ Windows Defender may call the launcher a virus: it is a false positive
-
-- **What you may see:** Windows Defender blocks or deletes `Play.Duskbloods.exe` with a name like `Trojan:Win32/Wacatac.B!ml`.
-- **Why it happens:** the launcher is a Python program packed into a single exe with PyInstaller. When it starts, it unpacks itself and then runs, and the exe is not digitally signed. Real malware is often packed the same way, so Defender's automatic guesswork flags it. The `!ml` at the end means "machine learning": a guess based on how the file looks, not a match with any known virus.
-- **Why we are sure it is a false positive:** every launcher version we scanned (1.3.2, 1.4.0 and 1.5.0) gets the same guess, and on some days the very same file scans clean. The launcher's source code is public in [its repository](https://github.com/sikoGD/playDB-CNT). `lichii.exe` and everything else in our zip scan clean. That is why the launcher is no longer bundled: it made our whole zip look infected.
-- **How to keep it:** open **Windows Security > Virus & threat protection > Protection history**, select the launcher entry, then **Actions > Allow** (or **Restore**). Do this only for the file you downloaded from the official playDB-CNT releases page.
 
 ## What's new in v4.1
 
