@@ -185,7 +185,7 @@ Built on [zortos293/Lichii](https://github.com/zortos293/Lichii), [Frizti/Lichii
 
 Special thanks to **Siko** ([sikoGD](https://github.com/sikoGD)), author of the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher. This release owes a lot to his Duskbloods build v30 and its follow-ups. From his work we took how to feed the game's real inputs to the temporal upscaler: the motion-vector scale and jitter conventions, tracking the game's depth and velocity render targets, and keeping the upscaler history when the render region changes size. That is the basis of the sharp FSR 3.1 image. His v32 also pointed the way to the save-freeze (2153-0002) fix, and its pause logging is ported here.
 
-v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-waited-write-back cap, the run summary and the Force maximum clocks guard) and from an open upstream pull request, [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (report reads that wait only for their own reports). Thanks to JalenJaceX2 for PR #2.
+v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-waited-write-back cap, the run summary and the Force maximum clocks guard) and from an open upstream pull request, [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (report reads that wait only for their own reports). Thanks to JalenJaceX2 for PR #2. Thanks to [Nameless-p1q8](https://github.com/Nameless-p1q8) (Discord: p1q8) for the v4.1 AMD fix.
 
 </details>
 
@@ -373,7 +373,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 
 شكر خاص لـ **Siko** ‏([sikoGD](https://github.com/sikoGD))، صاحب المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT). هذا الإصدار مدين كثيرًا لنسخته v30 من Duskbloods ولتحديثيها v31 وv32. أخذنا من عمله طريقة تمرير مدخلات اللعبة الحقيقية إلى أداة رفع الدقة الزمنية (temporal upscaler): مقياس متجهات الحركة واصطلاحات الـ jitter، وتتبّع أهداف الرسم الخاصة بالعمق والسرعة في اللعبة، والاحتفاظ بسجلّ أداة رفع الدقة عندما يتغيّر حجم منطقة الرسم. هذا هو أساس صورة FSR 3.1 الحادّة. كما أرشدتنا نسخته v32 إلى طريق إصلاح تجمّد الحفظ (2153-0002)، ونقلنا منها تسجيل فترات التوقّف.
 
-يستخدم الإصدار الرابع أيضًا أفكارًا من [Fritchii](https://github.com/Frizti/Fritchii) (حدّ إعادة الكتابة مع الانتظار، وملخّص الجلسة، وحماية خيار Force maximum clocks)، ومن طلب دمج مفتوح في المشروع الأصلي، [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (قراءة نتائج الاستعلامات مع انتظار نتائجها فقط). شكرًا لـ JalenJaceX2 على طلب الدمج رقم 2.
+يستخدم الإصدار الرابع أيضًا أفكارًا من [Fritchii](https://github.com/Frizti/Fritchii) (حدّ إعادة الكتابة مع الانتظار، وملخّص الجلسة، وحماية خيار Force maximum clocks)، ومن طلب دمج مفتوح في المشروع الأصلي، [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (قراءة نتائج الاستعلامات مع انتظار نتائجها فقط). شكرًا لـ JalenJaceX2 على طلب الدمج رقم 2. وشكرًا لـ [Nameless-p1q8](https://github.com/Nameless-p1q8) (على Discord: ‏p1q8) على إصلاح AMD في الإصدار 4.1.
 
 </div>
 
