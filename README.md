@@ -34,6 +34,12 @@ Put `Play.Duskbloods.exe` in the same folder as `lichii.exe`, then follow [Launc
 - **Why we are sure it is a false positive:** every launcher version we scanned (1.3.2, 1.4.0 and 1.5.0) gets the same guess, and on some days the very same file scans clean. The launcher's source code is public in [its repository](https://github.com/sikoGD/playDB-CNT). `lichii.exe` and everything else in our zip scan clean. That is why the launcher is no longer bundled: it made our whole zip look infected.
 - **How to keep it:** open **Windows Security > Virus & threat protection > Protection history**, select the launcher entry, then **Actions > Allow** (or **Restore**). Do this only for the file you downloaded from the official playDB-CNT releases page.
 
+## What's new in v4.1
+
+- **Updates itself:** when a new version is out, Lichii offers it and one click installs it, checked against GitHub's SHA-256 checksum. Never during a match: it waits until you press **Stop**. Started from the launcher, it closes after installing; start the game again from `Play.Duskbloods.exe`. **Help > Roll Back to the Previous Version** undoes an update. Your `user` folder, `nx2_switches.txt` and the launcher are never touched.
+- **AMD match crash fixed:** matches no longer crash with a lost GPU device (`0xbeefdeadb000`) on AMD cards (tested on an RX 9070 XT). The fix comes from upstream pull request #2125, plus two of our own GPU binding fixes.
+- **Tuned switches are built into `lichii.exe`**, so they update with it. `nx2_switches.txt` is now for troubleshooting only: a line there overrides a default, and `NAME=0` turns one off.
+
 ## What's new in v4
 
 - **Rebased on the newest zortos293/Lichii nx2** (after build 341; v3 was build 177): hundreds of upstream fixes, and fewer shader freezes (a draw whose shader is still building waits at most 8 ms, then shows a frame later).
@@ -84,11 +90,11 @@ AMD and Intel cards use FSR 3.1: same guidance, a bit softer. Avoid 2x on mid-ra
 | v3: upstream build 177 | FSR 3.1 in place of the game's DLSS pass, optional NVIDIA DLSS with live switching, fixes for the save freeze (2153-0002), crackling sound, Bot Match crashes, hub laser lines and flicker, and pixelated HUD above 1x |
 | v4: newest upstream | Direct light-data reads in the lighting shader (+30% fps at 2x), one waited texture write-back per frame (+10%), the IPv6 online fix |
 
-**Tested on:** an **NVIDIA RTX 3060** GPU with an **Intel Core i5-12400F** CPU. Other NVIDIA GPUs should behave the same; AMD and Intel GPUs are untested. Use a current GPU driver.
+**Tested on:** an **NVIDIA RTX 3060** GPU with an **Intel Core i5-12400F** CPU. Other NVIDIA GPUs should behave the same. AMD was tested on an RX 9070 XT; Intel GPUs are untested. Use a current GPU driver.
 
 ## Download
 
-**[Download v4 (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v4)**
+**[Download v4.1 (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v4.1)**
 
 Older builds: [all releases](https://github.com/Mr-Tb/lichii-dusk/releases).
 
@@ -109,7 +115,7 @@ Steps:
 4. **Launcher:** [download `Play.Duskbloods.exe`](https://github.com/sikoGD/playDB-CNT/releases/latest), put it next to `lichii.exe`, and set it up as described in [Launcher setup](#launcher-setup) below.
 5. **Play:** press **Start game** in `Play.Duskbloods.exe`. Always start the game through the launcher: started any other way, the game has no servers and stops at an online connection message.
 
-**Updating from v3:** extract v4 into a new folder and copy your old `user` folder over it (keys, firmware, saves). The first minutes stutter while shaders rebuild for the new version.
+**Updating from v4 or older:** this is the last manual update. Extract v4.1 into a new folder and copy your old `user` folder over it (keys, firmware, saves). The first minutes stutter while shaders rebuild for the new version. Then select the new `lichii.exe` in the launcher's Setup tab. From v4.1 on, Lichii updates itself.
 
 ## Launcher setup
 
@@ -153,7 +159,7 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
 
 - Brightness flicker or texture pop-in can appear when the PC runs low on memory (RAM plus page file). Close browsers and other heavy programs before playing.
 - The first launch stutters while shaders rebuild for the new version.
-- AMD and Intel GPUs are untested.
+- Intel GPUs are untested.
 - Windows Defender may flag the launcher by mistake. It is a false positive: see the warning at the top of this guide.
 - DLSS needs an RTX card and a one-time download of NVIDIA's files.
 
@@ -172,7 +178,7 @@ If DLSS cannot start, the emulator falls back to FSR 3.1.
 - **Error 2153-0513 at boot:** a save got corrupted, e.g. by force-closing during a save. Move the game's save folder under `user\nand\user\save\` aside and start again.
 - **Black screen after loading:** close and relaunch. A rare hang has been seen once.
 - **Black screen on first boot after updating:** delete the shader cache in `user\cache\shader\`.
-- **Flickering or broken geometry:** delete the line `EDEN_NX2_FRAMES_AHEAD=1` in `nx2_switches.txt` and restart.
+- **Flickering or broken geometry:** remove the `#` before `EDEN_NX2_FRAMES_AHEAD=0` in `nx2_switches.txt` and restart.
 - **Lights look wrong (black, flashing or missing):** remove the `#` before `EDEN_NX2_DUSK_LOADED_REBASE=0` in `nx2_switches.txt` (the old, slower light loading) and report it.
 - **No DLSS option or button:** it needs an RTX GPU and the four NVIDIA files in `user\streamline\`.
 - **Missing DLL errors:** extract the whole zip. Do not run `lichii.exe` from inside the archive.
@@ -215,6 +221,12 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - **لماذا يحدث هذا:** المشغّل برنامج مكتوب بلغة Python ومحزوم في ملف exe واحد بأداة PyInstaller. عند تشغيله يفكّ نفسه ثم يعمل، والملف غير موقّع رقميًا. كثير من البرامج الضارة تُحزم بنفس الطريقة، لذلك يشتبه به التخمين الآلي في Defender. الجزء `!ml` في آخر الاسم يعني "تعلّم آلي": أي تخمين مبني على شكل الملف، وليس تطابقًا مع فيروس معروف.
 - **لماذا نحن متأكدون أنه إنذار كاذب:** كل إصدارات المشغّل التي فحصناها (1.3.2 و1.4.0 و1.5.0) تحصل على نفس التخمين، وفي بعض الأيام ينجح فحص الملف نفسه دون أي تحذير. الكود المصدري للمشغّل منشور في [مستودعه](https://github.com/sikoGD/playDB-CNT). الملف `lichii.exe` وباقي محتويات ملفنا المضغوط نظيفة في الفحص، ولهذا لم نعد نضع المشغّل داخله: كان يجعل الملف المضغوط كله يبدو مصابًا.
 - **كيف تحتفظ به:** افتح **Windows Security > Virus & threat protection > Protection history**، واختر سجل المشغّل، ثم **Actions > Allow** (أو **Restore**). افعل ذلك فقط للملف الذي حمّلته من صفحة إصدارات playDB-CNT الرسمية.
+
+## الجديد في الإصدار 4.1
+
+- **تحديث تلقائي:** عند صدور نسخة جديدة يعرضها عليك Lichii، وضغطة واحدة تثبّتها بعد التحقق منها ببصمة SHA-256 من GitHub. لا يحدث ذلك أثناء المباراة أبدًا: ينتظر حتى تضغط **Stop**. إذا شغّلته من المشغّل، يُغلق بعد التثبيت، فشغّل اللعبة من جديد من `Play.Duskbloods.exe`. خيار **Help > Roll Back to the Previous Version** يلغي التحديث. لا يلمس التحديث مجلد `user` ولا الملف `nx2_switches.txt` ولا المشغّل.
+- **إصلاح انهيار المباريات على AMD:** لم تعد المباريات تنهار بسبب فقدان كرت الشاشة (`0xbeefdeadb000`) على كروت AMD (جُرّب على RX 9070 XT). الإصلاح من طلب الدمج #2125 في المشروع الأصلي، مع إصلاحين خاصين بنا لربط بيانات كرت الشاشة.
+- **الإعدادات المحسّنة صارت داخل `lichii.exe`** وتتحدّث معه. الملف `nx2_switches.txt` صار لحل المشاكل فقط: أي سطر فيه يغيّر القيمة الافتراضية، و`NAME=0` يوقف الخيار.
 
 ## الجديد في الإصدار الرابع
 
@@ -266,11 +278,11 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 | الإصدار الثالث: تحديث 177 | FSR 3.1 بدل مرحلة DLSS الخاصة باللعبة، و NVIDIA DLSS اختياري مع التبديل المباشر، وإصلاح تجمّد الحفظ (2153-0002) وطقطقة الصوت وانهيار Bot Match وخطوط الليزر والوميض في الـ hub وتكسّر الواجهة فوق 1x |
 | الإصدار الرابع: أحدث نسخة أصلية | قراءة بيانات الأضواء مباشرة في shader الإضاءة (+30% إطارات بدقة 2x)، إعادة كتابة صورة واحدة مع انتظار في كل إطار (+10%)، وإصلاح اتصال IPv6 |
 
-**تمّت التجربة على:** كرت شاشة **NVIDIA RTX 3060** مع معالج **Intel Core i5-12400F**. يُفترض أن تعمل كروت NVIDIA الأخرى بنفس الطريقة، أما كروت AMD وIntel فلم تُجرَّب. استخدم أحدث تعريف لكرت الشاشة.
+**تمّت التجربة على:** كرت شاشة **NVIDIA RTX 3060** مع معالج **Intel Core i5-12400F**. يُفترض أن تعمل كروت NVIDIA الأخرى بنفس الطريقة. كروت AMD جُرّبت على RX 9070 XT، أما كروت Intel فلم تُجرَّب. استخدم أحدث تعريف لكرت الشاشة.
 
 ## التحميل
 
-**[حمّل الإصدار الرابع (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v4)**
+**[حمّل الإصدار 4.1 (Lichii-Duskbloods.zip)](https://github.com/Mr-Tb/lichii-dusk/releases/tag/duskbloods-v4.1)**
 
 الإصدارات الأقدم: [كل الإصدارات](https://github.com/Mr-Tb/lichii-dusk/releases).
 
@@ -291,7 +303,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 4. **المشغّل:** [حمّل `Play.Duskbloods.exe`](https://github.com/sikoGD/playDB-CNT/releases/latest) وضعه بجانب `lichii.exe`، ثم جهّزه كما في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل.
 5. **اللعب:** اضغط **Start game** في `Play.Duskbloods.exe`. شغّل اللعبة دائمًا من المشغّل، فإذا شغّلتها بأي طريقة أخرى لن تجد أي خوادم، وستتوقف عند رسالة تطلب الاتصال بالإنترنت.
 
-**التحديث من الإصدار الثالث:** فكّ ضغط الإصدار الرابع في مجلد جديد، ثم انسخ مجلد `user` القديم فوقه (المفاتيح والـ firmware وملفات الحفظ). في الدقائق الأولى قد يحدث تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
+**التحديث من الإصدار الرابع أو الأقدم:** هذا آخر تحديث يدوي. فكّ ضغط الإصدار 4.1 في مجلد جديد، ثم انسخ مجلد `user` القديم فوقه (المفاتيح والـ firmware وملفات الحفظ). في الدقائق الأولى قد يحدث تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد. بعدها اختر `lichii.exe` الجديد في تبويب Setup في المشغّل. من الإصدار 4.1 فصاعدًا يحدّث Lichii نفسه.
 
 ## إعداد المشغّل
 
@@ -335,7 +347,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 
 - قد يظهر وميض في الإضاءة أو ظهور متأخر للصور عندما تقلّ ذاكرة الجهاز (الرام مع ملف الصفحات). أغلق المتصفحات والبرامج الثقيلة قبل اللعب.
 - أول تشغيل فيه تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد.
-- كروت AMD وIntel لم تُجرَّب.
+- كروت Intel لم تُجرَّب.
 - قد يصنّف Windows Defender المشغّل كتهديد بالخطأ. هذا إنذار كاذب: انظر التحذير في أعلى هذا الدليل.
 - DLSS يحتاج كرت RTX وتحميل ملفات NVIDIA مرة واحدة.
 
@@ -354,7 +366,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - **الخطأ 2153-0513 عند التشغيل:** ملف الحفظ تلف، مثلًا بسبب إغلاق اللعبة بالقوة أثناء الحفظ. انقل مجلد حفظ اللعبة داخل `user\nand\user\save\` إلى مكان آخر وأعد التشغيل.
 - **شاشة سوداء بعد التحميل:** أغلق اللعبة وأعد تشغيلها (حدث تعليق نادر مرة واحدة).
 - **شاشة سوداء أول تشغيل بعد التحديث:** احذف ذاكرة الـ shaders في `user\cache\shader\`.
-- **وميض أو أشكال مشوّهة:** احذف السطر `EDEN_NX2_FRAMES_AHEAD=1` من الملف `nx2_switches.txt` ثم أعد تشغيل المحاكي.
+- **وميض أو أشكال مشوّهة:** احذف علامة `#` قبل السطر `EDEN_NX2_FRAMES_AHEAD=0` في الملف `nx2_switches.txt` ثم أعد تشغيل المحاكي.
 - **الإضاءة تبدو خاطئة (سوداء أو تومض أو مفقودة):** احذف علامة `#` قبل السطر `EDEN_NX2_DUSK_LOADED_REBASE=0` في الملف `nx2_switches.txt` (طريقة تحميل الأضواء القديمة الأبطأ)، وأخبرنا بالمشكلة.
 - **لا يظهر خيار أو زر DLSS:** يحتاج كرت RTX والملفات الأربعة من NVIDIA داخل `user\streamline\`.
 - **رسائل عن ملفات DLL مفقودة:** فكّ الضغط عن الملف كاملًا، ولا تشغّل `lichii.exe` من داخل الملف المضغوط.
