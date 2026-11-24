@@ -32,6 +32,9 @@
 #endif
 
 #include "main_window.h"
+#ifdef ENABLE_UPDATE_CHECKER
+#include "updater/update_dialog.h"
+#endif
 
 #ifdef _WIN32
 #include <QScreen>
@@ -119,6 +122,10 @@ static void SetUpNvidiaShaderDiskCache() {
 int main(int argc, char* argv[]) {
 #if defined(__unix__) && !defined(__APPLE__) && !defined(__ANDROID__)
     SetUpNvidiaShaderDiskCache();
+#endif
+#ifdef ENABLE_UPDATE_CHECKER
+    // Before the switches are applied: it keeps the environment a restart starts from.
+    Updater::PrepareLaunch();
 #endif
     LoadNx2Switches(argv[0]);
 #if LICHII_ROOM

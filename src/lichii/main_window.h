@@ -479,6 +479,9 @@ private slots:
     // A manual check reports every outcome and ignores the skipped release and remind-later time.
     void CheckForUpdates(bool manual);
     void OnEmulatorUpdateAvailable();
+    // Shows pending_update once no game runs and no other dialog is open.
+    void OfferPendingUpdate();
+    void ShowRestartNote();
 #endif
     void KeepNextendoSessionAlive();
     // When a game boots with online play on: says why nextendo.network refuses it, if it does.
@@ -557,6 +560,10 @@ private:
     QFutureWatcher<UpdateChecker::CheckResult> update_watcher;
     bool update_check_running{};
     bool update_check_manual{};
+    // An update found while a game ran, offered when it stops.
+    std::optional<UpdateChecker::CheckResult> pending_update;
+    // What the process this one replaced said, such as "v5 is installed".
+    QString restart_note;
 #endif
 
     MultiplayerState* multiplayer_state = nullptr;

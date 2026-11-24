@@ -1,13 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2026 Eden Emulator Project
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <algorithm>
 #include <filesystem>
+#include <utility>
 #include <QTimer>
 #include <QEventLoop>
 #include <QCoreApplication>
 #include <QCryptographicHash>
 #include <QDir>
-#include <QFile>
+#include <QFileInfo>
+#include <QMessageBox>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QPushButton>
@@ -17,6 +20,7 @@
 #include <qdesktopservices.h>
 #include "common/logging.h"
 #include "common/scm_rev.h"
+#include "frontend_common/update_checker.h"
 #include "frontend_common/update_installer.h"
 #include "qt_common/abstract/frontend.h"
 #include "qt_common/abstract/progress.h"
@@ -34,25 +38,136 @@
 
 #undef GetSaveFileName
 
-UpdateDialog::UpdateDialog(const Common::Net::Release& release, QWidget* parent)
-    : QDialog(parent), ui(new Ui::UpdateDialog) {
+namespace fs = std::filesystem;
+
+namespace {
+
+// Never renamed: NVIDIA's per-exe shader cache and Play.Duskbloods.exe's settings name it.
+constexpr wchar_t ExeName[] = L"lichii.exe";
+// Set for a restarted process to a note it shows once it is up, such as "v5 is installed".
+constexpr char RestartNoteVariable[] = "LICHII_UPDATE_NOTE";
+// Set by Play.Duskbloods.exe for the process it starts. Its servers stop when that process exits,
+// so such a process is not restarted after an update: the player starts the game from it again.
+constexpr char LauncherVariable[] = "EDEN_NX2_ONLINE_SERVER";
+
+// Read in PrepareLaunch, before a swap can rename the running exe into update-old.
+fs::path& LaunchExe() {
+    static fs::path exe;
+    return exe;
+}
+
+QString& RestartNote() {
+    static QString note;
+    return note;
+}
+
+bool& StartedByLauncher() {
+    static bool launcher{};
+    return launcher;
+}
+
+fs::path InstallDir() {
+    if (LaunchExe().empty()) {
+        LaunchExe() = UpdateInstaller::RunningExePath();
+    }
+    return LaunchExe().parent_path();
+}
+
+// A message box on top of the main window. The update dialog and the progress dialogs are closed
+// by the time these show, and a box parented to them can end up hidden.
+QMessageBox::StandardButton Notify(QWidget* window, QMessageBox::Icon icon, const QString& title,
+                                   const QString& text,
+                                   QMessageBox::StandardButtons buttons = QMessageBox::Ok) {
+    QMessageBox box(icon, title, text, buttons, window);
+    box.setWindowFlag(Qt::WindowStaysOnTopHint);
+    box.show();
+    box.raise();
+    box.activateWindow();
+    return static_cast<QMessageBox::StandardButton>(box.exec());
+}
+
+std::string PathText(const fs::path& path) {
+    const auto text = path.u8string();
+    return {text.begin(), text.end()};
+}
+
+QString DuskName(const QString& version) {
+    return version.isEmpty() ? QCoreApplication::translate("UpdateDialog", "the previous version")
+                             : QStringLiteral("Lichii for The Duskbloods v%1").arg(version);
+}
+
+std::string RunningVersionText() {
+    const auto version = UpdateChecker::RunningVersion();
+    return version ? version->ToString() : std::string{};
+}
+
+QString ErrorText(const std::error_code& ec) {
+    return QString::fromLocal8Bit(ec.message().c_str());
+}
+
+QProcessEnvironment& LaunchEnvironment() {
+    static QProcessEnvironment environment;
+    return environment;
+}
+
+// For a process Play.Duskbloods.exe started: say what happened, then close without restarting.
+void CloseForLauncher(QWidget* window, const QString& text) {
+    LOG_INFO(Frontend, "Closing so the game is started again from Play.Duskbloods.exe");
+    Notify(window, QMessageBox::Information,
+           QCoreApplication::translate("Updater", "Lichii for The Duskbloods"), text);
+    // The log is written in blocks.
+    Common::Log::Stop();
+    if (window) {
+        QMetaObject::invokeMethod(window, &QWidget::close, Qt::QueuedConnection);
+    }
+}
+
+} // namespace
+
+UpdateDialog::UpdateDialog(const Common::Net::Release& release,
+                           std::optional<Common::Net::Asset> dusk_asset, QWidget* parent)
+    : QDialog(parent), ui(new Ui::UpdateDialog), m_release(release),
+      m_dusk(dusk_asset.has_value()) {
     ui->setupUi(this);
 
     ui->version->setText(
         tr("%1 is available for download.").arg(QString::fromStdString(release.title)));
     ui->url->setText(
         tr("<a href=\"%1\">View on GitHub</a>").arg(QString::fromStdString(release.html_url)));
-
-    std::string text{release.body};
-    if (auto pos = text.find("# Packages"); pos != std::string::npos) {
-        text = text.substr(0, pos);
-    }
-
-    ui->body->setMarkdown(QString::fromStdString(text));
+    ui->body->setMarkdown(
+        QString::fromStdString(UpdateChecker::CleanReleaseNotes(release.body)));
 
     ui->buttonBox->button(QDialogButtonBox::No)->setText(tr("Remind Me Later"));
     auto* skip = ui->buttonBox->addButton(tr("Skip This Version"), QDialogButtonBox::ActionRole);
     connect(skip, &QPushButton::clicked, this, [this] { done(SkipVersion); });
+
+    if (m_dusk) {
+        m_asset = *dusk_asset;
+        ui->groupBox->setHidden(true);
+        ui->version->setText(tr("%1 is available. You have Lichii for The Duskbloods %2.")
+                                 .arg(Updater::ReleaseName(release),
+                                      QString::fromLatin1(Common::g_build_label)));
+        auto* install = ui->buttonBox->button(QDialogButtonBox::Yes);
+        if (m_asset.sha256.empty()) {
+            // Without a published checksum there is nothing to verify the download against.
+            install->setText(tr("Open Release Page"));
+            ui->label_2->setText(tr("This release has no published checksum, so it can't be "
+                                    "installed automatically."));
+            connect(this, &QDialog::accepted, this, [this] {
+                QDesktopServices::openUrl(QUrl{QString::fromStdString(m_release.html_url)});
+            });
+            return;
+        }
+        if (Updater::CanInstallInPlace()) {
+            install->setText(tr("Install"));
+            ui->label_2->setText(tr("Lichii will download the update and install it. Your "
+                                    "settings, saves and keys are not changed."));
+        } else {
+            install->setText(tr("Download"));
+        }
+        connect(this, &QDialog::accepted, this, &UpdateDialog::Download);
+        return;
+    }
 
     // TODO(crueter): Find a way to set default
     const auto assets = release.GetPlatformAssets();
@@ -98,104 +213,27 @@ UpdateDialog::~UpdateDialog() {
     delete ui;
 }
 
-void UpdateDialog::Restart(QWidget* window, const QString& target) {
-    auto environment = QProcessEnvironment::systemEnvironment();
-    const auto app_dir = environment.value(QStringLiteral("APPDIR"));
-    if (!app_dir.isEmpty()) {
-        for (const auto& key : environment.keys()) {
-            const auto value = environment.value(key);
-            if (!value.contains(app_dir)) {
-                continue;
-            }
-            const auto stripped = UpdateInstaller::StripPathListEntries(value.toStdString(),
-                                                                        app_dir.toStdString());
-            if (stripped.empty()) {
-                environment.remove(key);
-            } else {
-                environment.insert(key, QString::fromStdString(stripped));
-            }
-        }
-    }
-    for (const auto& key : {"APPDIR", "APPIMAGE", "ARGV0", "OWD"}) {
-        environment.remove(QString::fromLatin1(key));
-    }
-
-    // Wait for this process to exit, so the new one reads the settings this one writes on close.
-    QProcess process;
-    process.setProgram(QStringLiteral("/bin/sh"));
-    process.setArguments(
-        {QStringLiteral("-c"),
-         QStringLiteral("i=0; while kill -0 \"$1\" 2>/dev/null && [ \"$i\" -lt 1500 ]; do "
-                        "sleep 0.2; i=$((i+1)); done; kill -0 \"$1\" 2>/dev/null && exit 0; "
-                        "exec \"$2\""),
-         QStringLiteral("sh"), QString::number(QCoreApplication::applicationPid()), target});
-    process.setProcessEnvironment(environment);
-    if (!process.startDetached()) {
-        LOG_ERROR(Frontend, "Could not start the restart helper for {}", target.toStdString());
-        QtCommon::Frontend::Critical(tr("Failed to restart"),
-                                     tr("Please start %1 again yourself.").arg(target));
-        return;
-    }
-    if (window) {
-        QMetaObject::invokeMethod(window, &QWidget::close, Qt::QueuedConnection);
-    }
-}
-
-#ifdef _WIN32
-bool UpdateDialog::LaunchInstaller(QWidget* window, const QString& staging) {
-    // The helper runs from a copy, because the installed one is replaced along with everything else.
-    const QString helper =
-        QCoreApplication::applicationDirPath() + QStringLiteral("/lichii-updater.exe");
-    const QString copy = QDir::temp().filePath(
-        QStringLiteral("lichii-updater-%1.exe").arg(QCoreApplication::applicationPid()));
-    QFile::remove(copy);
-    if (!QFile::copy(helper, copy)) {
-        LOG_ERROR(Frontend, "Could not copy the installer helper {}", helper.toStdString());
-        QtCommon::Frontend::Critical(tr("Failed to install the update"),
-                                     tr("Could not start the update installer."));
-        return false;
-    }
-
-    const auto install_dir = QCoreApplication::applicationDirPath();
-    const auto native = [](const QString& path) { return QDir::toNativeSeparators(path); };
-    if (!QProcess::startDetached(
-            copy, {QString::number(QCoreApplication::applicationPid()), native(staging),
-                   native(install_dir), native(QCoreApplication::applicationFilePath())})) {
-        LOG_ERROR(Frontend, "Could not start the installer helper {}", copy.toStdString());
-        QtCommon::Frontend::Critical(tr("Failed to install the update"),
-                                     tr("Could not start the update installer."));
-        return false;
-    }
-    if (window) {
-        QMetaObject::invokeMethod(window, &QWidget::close, Qt::QueuedConnection);
-    }
-    return true;
-}
-#endif
-
 void UpdateDialog::Download() {
 #ifdef _WIN32
-    if (m_asset.filename.ends_with(".zip")) {
-        const std::filesystem::path exe{QCoreApplication::applicationFilePath().toStdWString()};
-        if (UpdateInstaller::CanReplace(exe) &&
-            QFile::exists(QCoreApplication::applicationDirPath() +
-                          QStringLiteral("/lichii-updater.exe"))) {
-            InstallOnRestart(exe);
+    if (m_dusk && Updater::CanInstallInPlace()) {
+        if (UpdateInstaller::IsWritable(InstallDir())) {
+            InstallInPlace();
             return;
         }
+        LOG_WARNING(Frontend, "Cannot write to {}, downloading the update instead",
+                    PathText(InstallDir()));
+        Notify(parentWidget(), QMessageBox::Information, tr("Update Needs to Be Installed by Hand"),
+               tr("Lichii can't write to its folder (%1), so it can't update itself there. The "
+                  "update will be downloaded instead: unzip it and copy its contents over your "
+                  "Lichii folder, or move Lichii to a folder you can write to, such as "
+                  "Documents.")
+                   .arg(QDir::toNativeSeparators(QString::fromStdWString(InstallDir().wstring()))));
     }
 #endif
-#ifdef __linux__
-    if (Common::Net::CurrentLinuxPackage() == Common::Net::LinuxPackage::AppImage &&
-        m_asset.filename.ends_with(".AppImage")) {
-        const std::filesystem::path target{qEnvironmentVariable("APPIMAGE").toStdString()};
-        if (UpdateInstaller::CanReplace(target)) {
-            InstallInPlace(target);
-            return;
-        }
-    }
-#endif
+    SaveToFolder();
+}
 
+void UpdateDialog::SaveToFolder() {
     // The application folder is read-only inside an AppImage and is the app bundle on macOS.
     auto default_dir = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
     if (default_dir.isEmpty()) {
@@ -211,84 +249,57 @@ void UpdateDialog::Download() {
         return;
 
     // Download is complete. User may choose to open in the file manager.
-    auto button =
-        QtCommon::Frontend::Question(tr("Download Complete"),
-                                     tr("Successfully downloaded %1. Would you like to open it?")
-                                         .arg(QString::fromStdString(m_asset.filename)),
-                                     QtCommon::Frontend::Yes | QtCommon::Frontend::No);
+    auto button = Notify(parentWidget(), QMessageBox::Question, tr("Download Complete"),
+                         tr("Successfully downloaded %1. Would you like to open its "
+                            "folder?")
+                             .arg(QString::fromStdString(m_asset.filename)),
+                         QMessageBox::Yes | QMessageBox::No);
 
-    if (button == QtCommon::Frontend::Yes) {
-        QDesktopServices::openUrl(QUrl::fromLocalFile(filename));
-    }
-}
-
-void UpdateDialog::InstallInPlace(const std::filesystem::path& target) {
-    const UpdateInstaller::Lock lock{UpdateInstaller::LockPath(target)};
-    if (!lock.Held()) {
-        QtCommon::Frontend::Critical(tr("Failed to install the update"),
-                                     tr("Another Lichii window is already updating this "
-                                        "installation."));
-        return;
-    }
-
-    const auto staged = UpdateInstaller::StagedPath(target);
-    if (!DownloadTo(QString::fromStdString(staged.string()))) {
-        return;
-    }
-
-    std::error_code ec;
-    if (!UpdateInstaller::Swap(staged, target, ec)) {
-        LOG_ERROR(Frontend, "Could not replace {}: {}", target.string(), ec.message());
-        std::filesystem::remove(staged, ec);
-        QtCommon::Frontend::Critical(
-            tr("Failed to install the update"),
-            tr("Could not replace %1. Your installation was not changed.")
-                .arg(QString::fromStdString(target.string())));
-        return;
-    }
-
-    LOG_INFO(Frontend, "Installed {} over {}", m_asset.filename, target.string());
-    const auto button = QtCommon::Frontend::Question(
-        tr("Update Installed"),
-        tr("The new version is installed. The previous version is kept as %1.\n\nRestart now?")
-            .arg(QString::fromStdString(UpdateInstaller::PreviousPath(target).string())),
-        QtCommon::Frontend::Yes | QtCommon::Frontend::No);
-    if (button == QtCommon::Frontend::Yes) {
-        Restart(parentWidget(), QString::fromStdString(target.string()));
+    if (button == QMessageBox::Yes) {
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(filename).absolutePath()));
     }
 }
 
 #ifdef _WIN32
-void UpdateDialog::InstallOnRestart(const std::filesystem::path& exe) {
-    const auto install_dir = exe.parent_path();
-    const auto staging = install_dir / ".update-staging";
-    const auto archive = install_dir / ".update-download.zip";
-    const auto cleanup = [&] {
-        std::error_code ec;
-        std::filesystem::remove_all(staging, ec);
-        std::filesystem::remove(archive, ec);
-    };
+void UpdateDialog::InstallInPlace() {
+    const auto install_dir = InstallDir();
+    const UpdateInstaller::Lock lock{install_dir / UpdateInstaller::LockName};
+    if (!lock.Held()) {
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to install the update"),
+               tr("Another Lichii window is already updating this folder."));
+        return;
+    }
+    if (fs::exists(install_dir / UpdateInstaller::JournalName)) {
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to install the update"),
+               tr("An earlier update is unfinished. Start Lichii again to finish it first."));
+        return;
+    }
+
+    const auto staging = install_dir / UpdateInstaller::StagingName;
+    const auto archive = staging / m_asset.filename;
+    const auto unpacked = staging / "unpacked";
     const auto fail = [&](const QString& text) {
-        cleanup();
-        QtCommon::Frontend::Critical(tr("Failed to install the update"), text);
+        UpdateInstaller::CleanStaging(install_dir);
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to install the update"), text);
     };
 
-    cleanup();
+    UpdateInstaller::CleanStaging(install_dir);
     std::error_code ec;
-    std::filesystem::create_directories(staging, ec);
+    fs::create_directories(unpacked, ec);
     if (ec) {
-        fail(tr("Could not create a folder for the update."));
+        fail(tr("Could not create %1: %2")
+                 .arg(QString::fromStdWString(unpacked.wstring()), ErrorText(ec)));
         return;
     }
     if (!DownloadTo(QString::fromStdWString(archive.wstring()))) {
-        cleanup();
+        UpdateInstaller::CleanStaging(install_dir);
         return;
     }
 
     auto progress = QtCommon::Frontend::newProgressDialog(tr("Unpacking..."), tr("Cancel"), 0, 100);
     progress->show();
-    const auto unpacked = QtCommon::Compress::extractDir(
-        QString::fromStdWString(archive.wstring()), QString::fromStdWString(staging.wstring()),
+    const auto extracted = QtCommon::Compress::extractDir(
+        QString::fromStdWString(archive.wstring()), QString::fromStdWString(unpacked.wstring()),
         [&](std::size_t total, std::size_t done) {
             QGuiApplication::processEvents();
             if (total != 0) {
@@ -297,20 +308,81 @@ void UpdateDialog::InstallOnRestart(const std::filesystem::path& exe) {
             return !progress->wasCanceled();
         });
     progress->close();
-    if (unpacked.isEmpty() || !std::filesystem::exists(staging / exe.filename(), ec)) {
+    if (extracted.isEmpty()) {
         fail(tr("The downloaded update could not be unpacked."));
         return;
     }
-    std::filesystem::remove(archive, ec);
+    fs::remove(archive, ec);
 
-    const auto button = QtCommon::Frontend::Question(
-        tr("Update Ready"),
-        tr("Lichii will close, install the update and start again. The previous version is "
-           "kept, and your settings and data are not changed.\n\nRestart now?"),
-        QtCommon::Frontend::Yes | QtCommon::Frontend::No);
-    if (button != QtCommon::Frontend::Yes ||
-        !LaunchInstaller(parentWidget(), QString::fromStdWString(staging.wstring()))) {
-        cleanup();
+    // A package has no business carrying links; the swap would skip them, refuse the package.
+    for (auto it = fs::recursive_directory_iterator(unpacked, ec);
+         !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        if (it->is_symlink(ec)) {
+            LOG_ERROR(Frontend, "Update package contains a link: {}", PathText(it->path()));
+            fail(tr("The downloaded update contains a link, which an update must not have."));
+            return;
+        }
+    }
+    if (ec) {
+        fail(tr("Could not read the unpacked update: %1").arg(ErrorText(ec)));
+        return;
+    }
+
+    const auto package = UpdateInstaller::FindPackageRoot(unpacked, ExeName);
+    if (!package) {
+        // Fritchii v5.8.4 (2026-11-11): a player got this with a good zip: the exe was in it but
+        // gone from disk right after unpacking, as an antivirus quarantining a new unsigned exe
+        // does.
+        const bool in_archive = std::ranges::any_of(extracted, [](const QString& file) {
+            return file.endsWith(QStringLiteral("/lichii.exe"), Qt::CaseInsensitive) ||
+                   file.endsWith(QStringLiteral("\\lichii.exe"), Qt::CaseInsensitive);
+        });
+        LOG_ERROR(Frontend, "Update package without {}: {} files unpacked, the exe {} in the list",
+                  PathText(ExeName), extracted.size(), in_archive ? "was" : "was not");
+        fail(in_archive
+                 ? tr("Your antivirus probably removed lichii.exe from the update right after it "
+                      "was unpacked.\n\nAllow it in your antivirus and try again, or download %1 "
+                      "from the release page and unzip it over your Lichii folder. Your saves "
+                      "and settings are safe either way.")
+                       .arg(QString::fromStdString(m_asset.filename))
+                 : tr("The downloaded update does not contain lichii.exe."));
+        return;
+    }
+
+    switch (UpdateInstaller::Install(install_dir, *package, RunningVersionText(), ExeName, ec)) {
+    case UpdateInstaller::Outcome::Done: {
+        LOG_INFO(Frontend, "Installed {} in {}", m_release.tag, PathText(install_dir));
+        UpdateInstaller::CleanStaging(install_dir);
+        const auto name = Updater::ReleaseName(m_release);
+        if (StartedByLauncher()) {
+            CloseForLauncher(parentWidget(),
+                             tr("%1 is installed.\n\nStart the game again from "
+                                "Play.Duskbloods.exe. Help > Roll Back to the Previous Version "
+                                "brings the old one back.")
+                                 .arg(name));
+            return;
+        }
+        // Restart at once; the new version says it was installed when it is up.
+        Updater::Restart(parentWidget(),
+                         tr("%1 is installed.\n\nThe previous version is kept: Help > Roll Back "
+                            "to the Previous Version brings it back.")
+                             .arg(name));
+        return;
+    }
+    case UpdateInstaller::Outcome::Unchanged:
+        LOG_ERROR(Frontend, "Could not install {}: {}", m_release.tag, ec.message());
+        fail(tr("Could not replace the files of this version (%1). Lichii was not changed.")
+                 .arg(ErrorText(ec)));
+        return;
+    case UpdateInstaller::Outcome::Interrupted:
+        LOG_CRITICAL(Frontend, "Installing {} failed and could not be undone: {}", m_release.tag,
+                     ec.message());
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to install the update"),
+               tr("The update failed (%1) and some files could not be put back. Close Lichii and "
+                  "start it again to restore the previous version. If it does not start, download "
+                  "%2 again and unzip it over your Lichii folder; your user data is not affected.")
+                   .arg(ErrorText(ec), QString::fromStdString(m_asset.filename)));
+        return;
     }
 }
 #endif
@@ -320,8 +392,8 @@ bool UpdateDialog::DownloadTo(const QString& filename) {
     QSaveFile file(filename);
     if (!file.open(QIODevice::Truncate | QIODevice::WriteOnly)) {
         LOG_WARNING(Frontend, "Could not open file {}", filename.toStdString());
-        QtCommon::Frontend::Critical(tr("Failed to save file"),
-                                     tr("Could not open file %1 for writing.").arg(filename));
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to save file"),
+               tr("Could not open file %1 for writing.").arg(filename));
         return false;
     }
 
@@ -360,15 +432,15 @@ bool UpdateDialog::DownloadTo(const QString& filename) {
     u64 received = 0;
 
     // Write file in chunks.
-    auto content_receiver = [&file, &hash, &received, filename](const char* t_data,
-                                                                size_t data_length) -> bool {
+    auto content_receiver = [this, &file, &hash, &received, filename](const char* t_data,
+                                                                      size_t data_length) -> bool {
         hash.addData(QByteArrayView(t_data, static_cast<qsizetype>(data_length)));
         received += data_length;
-        if (file.write(t_data, data_length) == -1) {
+        if (file.write(t_data, static_cast<qint64>(data_length)) == -1) {
             LOG_WARNING(Frontend, "Could not write {} bytes to file {}", data_length,
                         filename.toStdString());
-            QtCommon::Frontend::Critical(tr("Failed to save file"),
-                                         tr("Could not write to file %1.").arg(filename));
+            Notify(parentWidget(), QMessageBox::Critical, tr("Failed to save file"),
+                   tr("Could not write to file %1.").arg(filename));
             return false;
         }
 
@@ -408,7 +480,13 @@ bool UpdateDialog::DownloadTo(const QString& filename) {
     progress->close();
 
     if (!result) {
-        LOG_ERROR(Frontend, "GET to {}{} returned null", m_asset.url, m_asset.path);
+        LOG_ERROR(Frontend, "GET to {}{} failed: {}", m_asset.url, m_asset.path,
+                  httplib::to_string(result.error()));
+        if (result.error() != httplib::Error::Canceled) {
+            Notify(parentWidget(), QMessageBox::Critical, tr("Failed to download file"),
+                   tr("Could not download the update. Check your internet "
+                      "connection and try again."));
+        }
         return false;
     }
 
@@ -416,11 +494,10 @@ bool UpdateDialog::DownloadTo(const QString& filename) {
     if (response.status >= 400) {
         LOG_ERROR(Frontend, "GET to {}{} returned error status code: {}", m_asset.url, m_asset.path,
                   response.status);
-        QtCommon::Frontend::Critical(tr("Failed to download file"),
-                                     tr("Could not download from %1%2\nError code: %3")
-                                         .arg(QString::fromStdString(m_asset.url),
-                                              QString::fromStdString(m_asset.path),
-                                              QString::number(response.status)));
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to download file"),
+               tr("Could not download from %1%2\nError code: %3")
+                   .arg(QString::fromStdString(m_asset.url), QString::fromStdString(m_asset.path),
+                        QString::number(response.status)));
         return false;
     }
     if (!response.has_header("content-type")) {
@@ -428,27 +505,240 @@ bool UpdateDialog::DownloadTo(const QString& filename) {
         return false;
     }
 
+    // Duskbloods packages are only kept when they match the digest the release list published.
     const bool wrong_size = m_asset.size != 0 && received != m_asset.size;
-    const bool wrong_hash =
-        !m_asset.sha256.empty() &&
-        hash.result().toHex() != QByteArray::fromStdString(m_asset.sha256);
+    const bool wrong_hash = (m_dusk || !m_asset.sha256.empty()) &&
+                            hash.result().toHex() != QByteArray::fromStdString(m_asset.sha256);
     if (wrong_size || wrong_hash) {
         LOG_ERROR(Frontend, "Downloaded {} does not match the published size or SHA-256",
                   m_asset.filename);
         file.cancelWriting();
-        QtCommon::Frontend::Critical(
-            tr("Download failed verification"),
-            tr("The downloaded file does not match the checksum GitHub published for it, so it "
-               "was discarded. Try again later."));
+        Notify(parentWidget(), QMessageBox::Critical, tr("Download failed verification"),
+               tr("The downloaded file does not match the checksum GitHub published for it, so it "
+                  "was discarded. Try again later."));
         return false;
     }
 
     if (!file.commit()) {
         LOG_WARNING(Frontend, "Could not commit to file {}", filename.toStdString());
-        QtCommon::Frontend::Critical(tr("Failed to save file"),
-                                     tr("Could not commit to file %1.").arg(filename));
+        Notify(parentWidget(), QMessageBox::Critical, tr("Failed to save file"),
+               tr("Could not commit to file %1.").arg(filename));
         return false;
     }
 
     return true;
 }
+
+namespace Updater {
+
+void PrepareLaunch() {
+    UpdateInstaller::WaitForReplacedProcess();
+    LaunchExe() = UpdateInstaller::RunningExePath();
+    RestartNote() = qEnvironmentVariable(RestartNoteVariable);
+    qunsetenv(RestartNoteVariable);
+    // Before nx2_switches.txt is applied, so only the real environment counts.
+    StartedByLauncher() = !qEnvironmentVariableIsEmpty(LauncherVariable);
+    LaunchEnvironment() = QProcessEnvironment::systemEnvironment();
+}
+
+std::optional<QString> TakeRestartNote() {
+    if (RestartNote().isEmpty()) {
+        return std::nullopt;
+    }
+    return std::exchange(RestartNote(), QString{});
+}
+
+bool CanInstallInPlace() {
+#ifdef _WIN32
+    const auto install_dir = InstallDir();
+    const auto exe = LaunchExe();
+    return UpdateChecker::RunningVersion().has_value() && !exe.empty() &&
+           !UpdateInstaller::IsUpdaterFolder(install_dir) &&
+           QString::fromStdWString(exe.filename().wstring())
+                   .compare(QString::fromWCharArray(ExeName), Qt::CaseInsensitive) == 0;
+#else
+    return false;
+#endif
+}
+
+bool FinishPendingSwap(QWidget* window) {
+    if (!CanInstallInPlace()) {
+        return false;
+    }
+    const auto install_dir = InstallDir();
+    std::error_code ec;
+    if (!fs::exists(install_dir / UpdateInstaller::JournalName, ec) &&
+        !fs::exists(install_dir / UpdateInstaller::StagingName, ec)) {
+        return false;
+    }
+    const UpdateInstaller::Lock lock{install_dir / UpdateInstaller::LockName};
+    if (!lock.Held()) {
+        // Another Lichii window is installing or rolling back right now.
+        return false;
+    }
+    switch (UpdateInstaller::Recover(install_dir, ec)) {
+    case UpdateInstaller::Recovery::None:
+    case UpdateInstaller::Recovery::Completed:
+        UpdateInstaller::CleanStaging(install_dir);
+        return false;
+    case UpdateInstaller::Recovery::Undone:
+        LOG_WARNING(Frontend, "Undid an interrupted update in {}", PathText(install_dir));
+        UpdateInstaller::CleanStaging(install_dir);
+        return Restart(window, QCoreApplication::translate(
+                                   "Updater", "An update was interrupted, so the version it was "
+                                              "replacing has been put back."));
+    case UpdateInstaller::Recovery::Failed:
+        LOG_CRITICAL(Frontend, "Could not undo an interrupted update in {}: {}",
+                     PathText(install_dir), ec.message());
+        Notify(window, QMessageBox::Critical,
+               QCoreApplication::translate("Updater", "Interrupted Update"),
+               QCoreApplication::translate(
+                   "Updater",
+                   "An update was interrupted and could not be undone (%1). Close every Lichii "
+                   "window and start Lichii again. If it keeps failing, download "
+                   "Lichii-Duskbloods.zip again and unzip it over your Lichii folder; your user "
+                   "data is not affected.")
+                   .arg(ErrorText(ec)));
+        return false;
+    }
+    return false;
+}
+
+std::optional<QString> RollbackVersion() {
+    if (!CanInstallInPlace()) {
+        return std::nullopt;
+    }
+    const auto version = UpdateInstaller::PreviousVersion(InstallDir(), ExeName);
+    return version ? std::make_optional(QString::fromStdString(*version)) : std::nullopt;
+}
+
+void RollBack(QWidget* window) {
+    const auto version = RollbackVersion();
+    if (!version) {
+        return;
+    }
+    const auto title = QCoreApplication::translate("Updater", "Roll Back");
+    const auto install_dir = InstallDir();
+    if (!UpdateInstaller::IsWritable(install_dir)) {
+        Notify(window, QMessageBox::Critical, title,
+               QCoreApplication::translate("Updater", "Lichii can't write to its folder (%1).")
+                   .arg(QDir::toNativeSeparators(QString::fromStdWString(install_dir.wstring()))));
+        return;
+    }
+    const auto answer =
+        Notify(window, QMessageBox::Question, title,
+               QCoreApplication::translate(
+                   "Updater", "Go back to %1? Lichii will %2. Your settings, saves "
+                              "and keys are not changed, and you can switch back to this "
+                              "version the same way.")
+                   .arg(DuskName(*version),
+                        StartedByLauncher() ? QCoreApplication::translate("Updater", "close")
+                                            : QCoreApplication::translate("Updater", "restart")),
+               QMessageBox::Yes | QMessageBox::No);
+    if (answer != QMessageBox::Yes) {
+        return;
+    }
+
+    const UpdateInstaller::Lock lock{install_dir / UpdateInstaller::LockName};
+    if (!lock.Held()) {
+        Notify(window, QMessageBox::Critical, title,
+               QCoreApplication::translate("Updater", "Another Lichii window is already "
+                                                      "updating this folder."));
+        return;
+    }
+    std::error_code ec;
+    switch (UpdateInstaller::RollBack(install_dir, RunningVersionText(), ExeName, ec)) {
+    case UpdateInstaller::Outcome::Done:
+        LOG_INFO(Frontend, "Rolled back to {} in {}", version->toStdString(),
+                 PathText(install_dir));
+        UpdateInstaller::CleanStaging(install_dir);
+        Restart(window, QCoreApplication::translate("Updater", "%1 is back. Help > Roll Back to "
+                                                               "the Previous Version switches to "
+                                                               "the newer version again.")
+                            .arg(DuskName(*version)));
+        return;
+    case UpdateInstaller::Outcome::Unchanged:
+        LOG_ERROR(Frontend, "Could not roll back: {}", ec.message());
+        UpdateInstaller::CleanStaging(install_dir);
+        Notify(window, QMessageBox::Critical, title,
+               QCoreApplication::translate("Updater",
+                                           "Could not roll back (%1). Lichii was not changed.")
+                   .arg(ErrorText(ec)));
+        return;
+    case UpdateInstaller::Outcome::Interrupted:
+        LOG_CRITICAL(Frontend, "Rolling back failed and could not be undone: {}", ec.message());
+        Notify(window, QMessageBox::Critical, title,
+               QCoreApplication::translate(
+                   "Updater", "Rolling back failed (%1) and some files could not be put "
+                              "back. Close Lichii and start it again to restore this version.")
+                   .arg(ErrorText(ec)));
+        return;
+    }
+}
+
+bool Restart(QWidget* window, const QString& note) {
+    if (StartedByLauncher()) {
+        // Play.Duskbloods.exe's servers stop with this process; a restarted one could not go
+        // online.
+        CloseForLauncher(window,
+                         note + QCoreApplication::translate(
+                                    "Updater", "\n\nStart the game again from Play.Duskbloods.exe."));
+        return true;
+    }
+    // The install folder from startup: Qt's applicationDirPath() now names update-old.
+    const auto exe = InstallDir() / ExeName;
+    const auto program = QString::fromStdWString(exe.wstring());
+    std::error_code ec;
+    if (UpdateInstaller::IsUpdaterFolder(exe.parent_path()) || !fs::is_regular_file(exe, ec)) {
+        LOG_CRITICAL(Frontend, "Not restarting {}: it is not the installed version", PathText(exe));
+        Notify(window, QMessageBox::Critical,
+               QCoreApplication::translate("Updater", "Failed to restart"),
+               QCoreApplication::translate("Updater", "Please start Lichii again yourself."));
+        return false;
+    }
+    std::vector<std::string> arguments;
+    for (const auto& argument : QCoreApplication::arguments().mid(1)) {
+        arguments.push_back(argument.toStdString());
+    }
+    QStringList kept;
+    for (const auto& argument : UpdateInstaller::RestartArguments(arguments)) {
+        kept.push_back(QString::fromStdString(argument));
+    }
+
+    // The environment from before main() added the built-in switches, so the new version applies
+    // its own.
+    auto environment = LaunchEnvironment().isEmpty() ? QProcessEnvironment::systemEnvironment()
+                                                     : LaunchEnvironment();
+    environment.insert(QString::fromLatin1(UpdateInstaller::RestartWaitVariable),
+                       QString::number(QCoreApplication::applicationPid()));
+    if (!note.isEmpty()) {
+        environment.insert(QString::fromLatin1(RestartNoteVariable), note);
+    }
+    QProcess process;
+    process.setProgram(program);
+    process.setArguments(kept);
+    process.setProcessEnvironment(environment);
+    process.setWorkingDirectory(QDir::currentPath());
+    if (!process.startDetached()) {
+        LOG_ERROR(Frontend, "Could not start {}", program.toStdString());
+        Notify(window, QMessageBox::Critical,
+               QCoreApplication::translate("Updater", "Failed to restart"),
+               QCoreApplication::translate("Updater", "Please start Lichii again yourself."));
+        return false;
+    }
+    LOG_INFO(Frontend, "Restarting {}", PathText(exe));
+    // The log is written in blocks, and the new process only starts once this one has exited.
+    Common::Log::Stop();
+    if (window) {
+        QMetaObject::invokeMethod(window, &QWidget::close, Qt::QueuedConnection);
+    }
+    return true;
+}
+
+QString ReleaseName(const Common::Net::Release& release) {
+    const auto version = UpdateChecker::ParseDuskTag(release.tag);
+    return version ? DuskName(QString::fromStdString(version->ToString()))
+                   : QString::fromStdString(release.title);
+}
+
+} // namespace Updater

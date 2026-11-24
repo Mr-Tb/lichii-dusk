@@ -9,6 +9,7 @@
 #include <fstream>
 #include <map>
 #include <string>
+#include <utility>
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
@@ -78,9 +79,21 @@ static std::filesystem::path GetSwitchExeDirectory(const char* argv0) {
 #endif
 }
 
+// Built into lichii.exe, so an in-place update brings new defaults while the player's
+// nx2_switches.txt is kept: either nx2_switches.txt or the real environment overrides any of them
+// (NAME=0 turns one off). The values v4 shipped in nx2_switches.txt.
+constexpr std::pair<const char*, const char*> DuskBuiltinSwitches[] = {
+    {"EDEN_NX2_SPLIT", "2"},
+    {"EDEN_NX2_FENCE_BATCH", "1"},
+    {"EDEN_NX2_FRAMES_AHEAD", "1"},
+    {"EDEN_NX2_HOSTTIMING_PRIO", "0"},
+    {"EDEN_NX2_STUTTER_TRACE", "1"},
+};
+
 static void LoadNx2Switches(const char* argv0) {
     // Later files overwrite earlier entries; the real environment is checked only at the end.
-    std::map<std::string, std::string> entries;
+    std::map<std::string, std::string> entries{std::begin(DuskBuiltinSwitches),
+                                               std::end(DuskBuiltinSwitches)};
     if (const auto exe_dir = GetSwitchExeDirectory(argv0); !exe_dir.empty()) {
         auto switches_dir = exe_dir;
 #ifdef __APPLE__

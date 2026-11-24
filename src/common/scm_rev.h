@@ -15,6 +15,10 @@ extern const char g_build_name[];
 extern const char g_build_date[];
 extern const char g_build_fullname[];
 extern const char g_build_version[];
+// What players see, such as "v4.1" or "v4.1 test 9" (dist/dusk_version_label.txt).
+extern const char g_build_label[];
+// The release number from dist/dusk_version.txt, such as "4.1"; empty on other builds.
+extern const char g_build_dusk_version[];
 extern const char g_build_id[];
 extern const char g_build_release_tag[];
 extern const char g_build_release_platform[];

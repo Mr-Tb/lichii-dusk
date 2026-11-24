@@ -23,7 +23,9 @@
 #include "configuration/configure_post_processing.h"
 #include "video_core/post_processing/fx_preset.h"
 #endif
+#ifdef ENABLE_UPDATE_CHECKER
 #include "updater/update_dialog.h"
+#endif
 
 #include "common/fs/ryujinx_compat.h"
 #include "main_window.h"
@@ -146,7 +148,6 @@ static FileSys::VirtualFile VfsDirectoryCreateFileWrapper(const FileSys::Virtual
 
 #ifdef ENABLE_UPDATE_CHECKER
 #include "frontend_common/update_checker.h"
-#include "frontend_common/update_installer.h"
 #endif
 
 // Common //
@@ -584,8 +585,15 @@ MainWindow::MainWindow(bool has_broken_vulkan)
 #ifdef ENABLE_UPDATE_CHECKER
     connect(&update_watcher, &QFutureWatcher<UpdateChecker::CheckResult>::finished, this,
             &MainWindow::OnEmulatorUpdateAvailable);
-    if (UISettings::values.check_for_updates) {
-        CheckForUpdates(false);
+    // A swap that a crash interrupted is finished or undone before anything else.
+    if (!Updater::FinishPendingSwap(this)) {
+        if (auto note = Updater::TakeRestartNote()) {
+            restart_note = std::move(*note);
+            QTimer::singleShot(0, this, &MainWindow::ShowRestartNote);
+        }
+        if (UISettings::values.check_for_updates) {
+            CheckForUpdates(false);
+        }
     }
 #endif
 
@@ -2047,7 +2055,14 @@ void MainWindow::ConnectMenuEvents() {
     connect_menu(ui->action_Firmware_From_ZIP, &MainWindow::OnInstallFirmwareFromZIP);
     connect_menu(ui->action_Install_Keys, &MainWindow::OnInstallDecryptionKeys);
 #ifdef ENABLE_UPDATE_CHECKER
-    connect_menu(ui->action_Check_For_Updates, [this] { CheckForUpdates(true); });
+    connect_menu(ui->action_Check_For_Updates, [this] {
+        if (emulation_running || boot_in_progress) {
+            QMessageBox::information(this, tr("Check for Updates"),
+                                     tr("Stop the game first, then check for updates."));
+            return;
+        }
+        CheckForUpdates(true);
+    });
 #else
     ui->action_Check_For_Updates->setVisible(false);
 #endif
@@ -2064,62 +2079,17 @@ void MainWindow::ConnectMenuEvents() {
     });
     connect_menu(ui->action_Data_Manager, &MainWindow::OnDataDialog);
 
-#if defined(ENABLE_UPDATE_CHECKER) && (defined(__linux__) || defined(_WIN32))
-    auto* restore_action = ui->menu_Help->addAction(tr("Restore Previous Version..."));
-    restore_action->setVisible(false);
-#ifdef __linux__
-    const auto previous_version = [] {
-        const std::filesystem::path target{qEnvironmentVariable("APPIMAGE").toStdString()};
-        std::error_code ec;
-        return !target.empty() && std::filesystem::is_regular_file(
-                                      UpdateInstaller::PreviousPath(target), ec)
-                   ? target
-                   : std::filesystem::path{};
-    };
-#else
-    const auto previous_version = [] {
-        const std::filesystem::path backup =
-            std::filesystem::path{QCoreApplication::applicationDirPath().toStdWString()} /
-            UpdateInstaller::BackupName;
-        std::error_code ec;
-        return std::filesystem::is_directory(backup, ec) ? backup : std::filesystem::path{};
-    };
-#endif
-    connect(ui->menu_Help, &QMenu::aboutToShow, restore_action,
-            [restore_action, previous_version] {
-                restore_action->setVisible(!previous_version().empty());
-            });
-    connect(restore_action, &QAction::triggered, this, [this, previous_version] {
-        const auto previous = previous_version();
-        if (previous.empty()) {
-            return;
+#ifdef ENABLE_UPDATE_CHECKER
+    auto* rollback_action = ui->menu_Help->addAction(tr("Roll Back to the Previous Version..."));
+    rollback_action->setVisible(false);
+    connect(ui->menu_Help, &QMenu::aboutToShow, this, [this, rollback_action] {
+        rollback_action->setVisible(Updater::RollbackVersion().has_value());
+        rollback_action->setEnabled(!emulation_running && !boot_in_progress);
+    });
+    connect(rollback_action, &QAction::triggered, this, [this] {
+        if (!emulation_running && !boot_in_progress) {
+            Updater::RollBack(this);
         }
-        const auto answer = QtCommon::Frontend::Question(
-            tr("Restore Previous Version"),
-            tr("Go back to the version this one replaced? Your settings and data are not "
-               "changed."),
-            QtCommon::Frontend::Yes | QtCommon::Frontend::No);
-        if (answer != QtCommon::Frontend::Yes) {
-            return;
-        }
-#ifdef __linux__
-        const UpdateInstaller::Lock lock{UpdateInstaller::LockPath(previous)};
-        std::error_code ec;
-        if (!lock.Held()) {
-            ec = std::make_error_code(std::errc::device_or_resource_busy);
-        }
-        if (!lock.Held() || !UpdateInstaller::Rollback(previous, ec)) {
-            LOG_ERROR(Frontend, "Could not restore the previous version: {}", ec.message());
-            QtCommon::Frontend::Critical(tr("Failed to restore"),
-                                         tr("Could not restore the previous version: %1")
-                                             .arg(QString::fromStdString(ec.message())));
-            return;
-        }
-        LOG_INFO(Frontend, "Restored the previous version of {}", previous.string());
-        UpdateDialog::Restart(this, QString::fromStdString(previous.string()));
-#else
-        UpdateDialog::LaunchInstaller(this, QString::fromStdWString(previous.wstring()));
-#endif
     });
 #endif
 }
@@ -3110,6 +3080,11 @@ void MainWindow::OnEmulationStopped() {
         game_list->SetScanEnabled(true);
         game_list->PopulateAsync(UISettings::values.game_dirs);
     }
+#ifdef ENABLE_UPDATE_CHECKER
+    if (pending_update && !close_pending) {
+        QTimer::singleShot(0, this, &MainWindow::OfferPendingUpdate);
+    }
+#endif
 }
 
 void MainWindow::ShutdownGame() {
@@ -5781,8 +5756,9 @@ void MainWindow::OnEmulatorUpdateAvailable() {
     if (!result.update) {
         if (manual) {
             QMessageBox::information(this, tr("Check for Updates"),
-                                     tr("You're on the latest build (%1).")
-                                         .arg(QString::fromUtf8(Common::g_build_release_tag)));
+                                     tr("You have the latest version (Lichii for The Duskbloods "
+                                        "%1).")
+                                         .arg(QString::fromLatin1(Common::g_build_label)));
         }
         return;
     }
@@ -5793,8 +5769,31 @@ void MainWindow::OnEmulatorUpdateAvailable() {
                     UISettings::values.update_remind_at.GetValue() > now)) {
         return;
     }
+    pending_update = result;
+    if (emulation_running || boot_in_progress) {
+        statusBar()->showMessage(tr("%1 is available — press Stop to install")
+                                     .arg(Updater::ReleaseName(release)),
+                                 15000);
+        return;
+    }
+    OfferPendingUpdate();
+}
 
-    UpdateDialog dialog(release, this);
+void MainWindow::OfferPendingUpdate() {
+    if (!pending_update || close_pending || emulation_running || boot_in_progress) {
+        // OnEmulationStopped offers it once the game is closed.
+        return;
+    }
+    // Wait for other dialogs to be answered.
+    if (QApplication::activeModalWidget() != nullptr) {
+        QTimer::singleShot(1000, this, &MainWindow::OfferPendingUpdate);
+        return;
+    }
+    const auto result = std::move(*pending_update);
+    pending_update.reset();
+    const auto& release = *result.update;
+    const auto now = static_cast<unsigned long long>(QDateTime::currentSecsSinceEpoch());
+    UpdateDialog dialog(release, result.asset, this);
     switch (dialog.exec()) {
     case UpdateDialog::SkipVersion:
         UISettings::values.skipped_update_tag = release.tag;
@@ -5806,6 +5805,14 @@ void MainWindow::OnEmulatorUpdateAvailable() {
         return;
     }
     OnSaveConfig();
+}
+
+void MainWindow::ShowRestartNote() {
+    if (QApplication::activeModalWidget() != nullptr) {
+        QTimer::singleShot(1000, this, &MainWindow::ShowRestartNote);
+        return;
+    }
+    QMessageBox::information(this, tr("Lichii for The Duskbloods"), restart_note);
 }
 #endif
 
