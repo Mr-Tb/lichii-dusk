@@ -677,7 +677,7 @@ struct System::Impl {
                      "GPU-only regions {}, totals {} remote memory, AOFFI gather {}, "
                      "host-timing priority {}, compute write mark {}, compute size word {}, ribbon {}, "
                      "back cuts {} [{}], loaded-pointer loads {}, report reads wait {}, collector "
-                     "GPU waits {}, list-fed grid macros reverted (#1651)",
+                     "GPU waits {}, list-fed grid macros upstream",
                      env("EDEN_NX2_DUSK_STACK") == "upstream" ? "upstream (#1490)" : "v25 (fold)",
                      flag("EDEN_NX2_HOSTTIMING_SPIN", true) ? "spin (v2.5)" : "OS sleep (#1016)",
                      env("EDEN_NX2_UPLOAD_STALE").empty() || env("EDEN_NX2_UPLOAD_STALE")[0] == '1'

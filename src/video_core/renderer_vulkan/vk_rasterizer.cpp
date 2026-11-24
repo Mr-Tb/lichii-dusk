@@ -2675,11 +2675,14 @@ void RasterizerVulkan::DispatchCompute() {
     const bool marking_effects = oot_effects_frame == render_trace_frame &&
                                  OcarinaTemporalEnabled() && !indirect_address && !list_slot &&
                                  !frame_dump.Capturing();
+    // Every dispatch records its bind with itself: anything that submits between Configure and
+    // the dispatch (buffer cut downloads, report waits) would otherwise leave the pipeline and
+    // its descriptor set in the previous command buffer, and AMD then reads unbound sets.
     ComputePipeline::BindCommand deferred_bind;
     switch (pipeline->Configure(*kepler_compute, *gpu_memory, scheduler, buffer_cache,
                                 texture_cache, texture_cache_runtime, pipeline_cache,
                                 byte_addressed_shadow,
-                                can_replace || marking_effects ? &deferred_bind : nullptr)) {
+                                &deferred_bind)) {
     case ComputePipeline::ConfigureResult::Ready:
         break;
     case ComputePipeline::ConfigureResult::Failed:
@@ -2750,15 +2753,23 @@ void RasterizerVulkan::DispatchCompute() {
         auto& slots = buffer_cache_runtime.Nx2Slots();
         if (!slots.Held(*list_slot)) {
             LOG_ERROR(Render_Vulkan, "Nx2 list slot {} dispatched without a hold", *list_slot);
+            // Configure moved the descriptor-buffer tracker to this bind; record it so the tracker holds.
+            scheduler.Record(std::move(deferred_bind));
             return;
         }
         const auto [args_buffer, args_offset] = slots.DispatchArguments(*list_slot);
         scheduler.RequestOutsideRenderPassOperationContext();
         scheduler.NoteComputeWrites();
         scheduler.TraceComputePipeline(pipeline->ShaderHash());
+        // The bind is recorded with the dispatch: a submit after Configure (a buffer cut's
+        // download) would otherwise leave it in the previous command buffer.
         scheduler.Record([this, pipeline, byte_addressed_shadow, indirect_buffer = args_buffer,
-                          indirect_offset = args_offset](vk::CommandBuffer cmdbuf) {
+                          indirect_offset = args_offset,
+                          bind = std::move(deferred_bind)](vk::CommandBuffer cmdbuf) {
             RecordDispatchBarrier(cmdbuf);
+            if (bind) {
+                bind(cmdbuf);
+            }
             if (!pipeline->IsBound()) {
                 return;
             }
@@ -2786,15 +2797,20 @@ void RasterizerVulkan::DispatchCompute() {
         return;
     }
     if (indirect_address) {
-        // DispatchIndirect
+        // DispatchIndirect. Obtaining the arguments can submit (cutting a large buffer downloads
+        // it), so the bind Configure prepared is recorded with the dispatch, not before it.
         const auto [buffer, offset] =
             VideoCommon::ObtainIndirectBuffer(buffer_cache, *indirect_address);
         scheduler.RequestOutsideRenderPassOperationContext();
         scheduler.NoteComputeWrites();
         scheduler.TraceComputePipeline(pipeline->ShaderHash());
         scheduler.Record([this, pipeline, indirect_buffer = buffer->Handle(),
-                          indirect_offset = offset](vk::CommandBuffer cmdbuf) {
+                          indirect_offset = offset,
+                          bind = std::move(deferred_bind)](vk::CommandBuffer cmdbuf) {
             RecordDispatchBarrier(cmdbuf);
+            if (bind) {
+                bind(cmdbuf);
+            }
             if (!pipeline->IsBound()) {
                 return;
             }
@@ -2813,6 +2829,8 @@ void RasterizerVulkan::DispatchCompute() {
     const std::array<u32, 3> dim{qmd.grid_dim_x, qmd.grid_dim_y, qmd.grid_dim_z};
     const std::array<u32, 3> max_dim{device.GetMaxComputeWorkGroupCount()};
     if (dim[0] > max_dim[0] || dim[1] > max_dim[1] || dim[2] > max_dim[2]) {
+        // Configure moved the descriptor-buffer tracker to this bind; record it so the tracker holds.
+        scheduler.Record(std::move(deferred_bind));
         return;
     }
     scheduler.RequestOutsideRenderPassOperationContext();

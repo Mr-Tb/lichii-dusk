@@ -3642,10 +3642,12 @@ ComputePipelineCacheEntry PipelineCache::CreateComputePipeline(
         job->program = std::move(program);
         // Copied by the pipeline before its job can run
         const Shader::Info& info = job->program.info;
-        auto emit = [this, job, shader_hash = key.unique_hash](std::vector<u8>& kept_spirv) mutable {
+        auto emit = [this, job, shader_hash = key.unique_hash](std::vector<u8>& kept_spirv,
+                                                               bool& uses_cooperative_matrix) mutable {
             const auto begin = std::chrono::steady_clock::now();
             vk::ShaderModule module{EmitComputeModule(device, profile, job->program, shader_hash,
                                                       kept_spirv, job->reference_spirv)};
+            uses_cooperative_matrix = job->program.info.uses_cooperative_matrix;
             auto completed_pools = std::move(job->pools);
             job.reset();
             ReturnPools(std::move(completed_pools));

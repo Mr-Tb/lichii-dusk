@@ -52,7 +52,7 @@ public:
                              VideoCore::ShaderNotify* shader_notify, const Shader::Info& info,
                              vk::ShaderModule spv_module, u64 shader_hash,
                              std::vector<u8> kept_spirv,
-                             std::function<vk::ShaderModule(std::vector<u8>&)> emit = {});
+                             std::function<vk::ShaderModule(std::vector<u8>&, bool&)> emit = {});
 
     ~ComputePipeline();
 

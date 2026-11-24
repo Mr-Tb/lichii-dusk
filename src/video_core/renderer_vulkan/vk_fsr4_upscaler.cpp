@@ -459,6 +459,7 @@ bool Fsr4Upscaler::Upscale(const Inputs& in) {
         cmdbuf.PipelineBarrier(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, {}, {}, back);
     });
+    scheduler.InvalidateState();
     return true;
 }
 

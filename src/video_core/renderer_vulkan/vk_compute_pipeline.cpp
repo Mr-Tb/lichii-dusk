@@ -213,7 +213,7 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
                                  VideoCore::ShaderNotify* shader_notify, const Shader::Info& info_,
                                  vk::ShaderModule spv_module_, u64 shader_hash_,
                                  std::vector<u8> kept_spirv_,
-                                 std::function<vk::ShaderModule(std::vector<u8>&)> emit)
+                                 std::function<vk::ShaderModule(std::vector<u8>&, bool&)> emit)
     : device{device_},
       pipeline_cache(pipeline_cache_), binaries{binaries_}, binary_key{binary_key_},
       guest_descriptor_queue{guest_descriptor_queue_},
@@ -380,7 +380,9 @@ ComputePipeline::ComputePipeline(const Device& device_, Scheduler& scheduler, vk
                     }
                 };
                 try {
-                    spv_module = emit(kept_spirv);
+                    // Emission decides whether the shader uses cooperative matrices; the
+                    // driver build below reads it for the subgroup size.
+                    spv_module = emit(kept_spirv, info.uses_cooperative_matrix);
                 } catch (const std::exception& exception) {
                     fail(exception.what());
                     return {};
@@ -779,9 +781,11 @@ ComputePipeline::ConfigureResult ComputePipeline::Configure(
         descriptor_buffer_chunk = alloc.chunk;
     }
 
+    // A deferred bind always binds its chunk, and the tracker still learns it: a later bind of
+    // the same chunk must not be skipped as already bound while this one names another.
     const bool bind_descriptor_buffer{
         uses_descriptor_buffer &&
-        (deferred_bind || scheduler.UpdateDescriptorBufferChunk(descriptor_buffer_chunk))};
+        (scheduler.UpdateDescriptorBufferChunk(descriptor_buffer_chunk) || deferred_bind)};
 
     if (shadow) {
         image_index = Shader::NumDescriptors(info.texture_buffer_descriptors) +
