@@ -89,6 +89,9 @@ constexpr std::pair<const char*, const char*> DuskBuiltinSwitches[] = {
     {"EDEN_NX2_FRAMES_AHEAD", "1"},
     {"EDEN_NX2_HOSTTIMING_PRIO", "0"},
     {"EDEN_NX2_PASS_TIMING", "0"},
+    // The game waits for the GPU thread only when it falls more than 8 submits behind (~1/3 of
+    // a frame): most of EDEN_NX2_SYNC_SUBMIT=0's speed, without its texture blinking.
+    {"EDEN_NX2_SYNC_SUBMIT_LAG", "8"},
 };
 
 static void LoadNx2Switches(const char* argv0) {
