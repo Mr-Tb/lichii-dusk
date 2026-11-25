@@ -17,7 +17,7 @@
 <summary><b>English: open the guide</b></summary>
 
 **This is a fork of [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2, newest upstream after build 341), tuned to run *The Duskbloods Network Test* (program `0400D1D02399A000`) on Windows PCs.**
-It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher by sikoGD, which provides the local network-test servers the game needs to get in-game. The launcher is a separate download: see the two boxes below.
+It pairs with the [playDB-CNT](https://github.com/sikoGD/playDB-CNT) launcher, which provides the local network-test servers the game needs to get in-game. The launcher is a separate download: see the two boxes below.
 
 > Not affiliated with Nintendo, FromSoftware or the upstream projects. No games, keys or firmware are included. Use only files you have legally dumped yourself.
 ⚠️ The launcher is NOT in the zip: download it separately
@@ -30,7 +30,19 @@ Put `Play.Duskbloods.exe` in the same folder as `lichii.exe`, then follow [Launc
 - **Faster, smoother matches:** the game used to wait for the emulator after each of its ~24 GPU submits per frame. Now it waits only when the emulator falls more than 8 submits behind, so the GPU stays busy and the game runs a frame ahead again. On an RTX 3060 at 1.5x the game waits 6 ms instead of 13 ms per frame; faster GPUs that were held back by this wait gain the most.
 - **Less overhead:** the stutter trace and per-pass GPU timing (diagnostics) are off by default.
 - **Upstream fixes:** a 512 MiB cap on the game's graphics table buffer, CPU writes that raced the GPU's page tracking are no longer lost, the fog/brightness readback fix, retired textures kept until the GPU is done with them, invalid shader IDs no longer reach the driver, and a JIT rounding fix from Fritchii.
-- **On v4.1, Lichii offers v4.2 by itself** (Help > Check for Updates).
+- **On v4.1, Lichii offers v4.2 by itself:** see [Updating through the launcher](#updating-through-the-launcher).
+
+## Tune v4.2 for your GPU: `EDEN_NX2_SYNC_SUBMIT_LAG`
+
+The number is how far the game may run ahead of the emulator. **Higher = more fps on strong GPUs, but textures may blink on and off. Lower = no blinking, a little slower.**
+
+| Your GPU | Value | Why |
+|---|---|---|
+| Laptops and entry cards (GTX 1650/1660, RTX 2060/3050, RX 6500–6600, Arc A380–A580) | **4** | The GPU is the limit anyway: same fps, no blinking |
+| Mid-range (RTX 3060–4060 Ti, RX 6700–7700, Arc A750/A770/B580) | **8** (default) | Tested on an RTX 3060: frame ahead kept, blinking barely noticeable |
+| High-end (RTX 4070 and up, RX 7800 XT and up, RX 9070) | **12**, or `EDEN_NX2_SYNC_SUBMIT=0` for maximum fps | The wait was what held these back. Textures blink? Go back to 8 |
+
+**How to change it:** open `nx2_switches.txt` (next to `lichii.exe`) in Notepad, add the line `EDEN_NX2_SYNC_SUBMIT_LAG=4` (or 12), save, and start the game again. Delete the line to go back to 8.
 
 ## What's new in v4.1
 
@@ -113,7 +125,18 @@ Steps:
 4. **Launcher:** [download `Play.Duskbloods.exe`](https://github.com/sikoGD/playDB-CNT/releases/latest), put it next to `lichii.exe`, and set it up as described in [Launcher setup](#launcher-setup) below.
 5. **Play:** press **Start game** in `Play.Duskbloods.exe`. Always start the game through the launcher: started any other way, the game has no servers and stops at an online connection message.
 
-**Updating from v4.1:** Lichii offers the new version by itself. **From v4 or older:** this is the last manual update. Extract the new version into a new folder and copy your old `user` folder over it (keys, firmware, saves). The first minutes stutter while shaders rebuild for the new version. Then select the new `lichii.exe` in the launcher's Setup tab. From v4.1 on, Lichii updates itself.
+### Updating through the launcher
+
+From v4.1 on, Lichii updates itself:
+1. Start the game with **Start game** in `Play.Duskbloods.exe`, as always.
+2. Lichii checks for updates by itself. During play the status bar says **"vX is available — press Stop to install"**.
+3. When you are done playing, use **Emulation > Stop** (do not close the window with X, or the offer waits for next time).
+4. Click **Install**. Lichii updates, then closes and tells you to start again.
+5. Press **Start game** in the launcher again.
+
+Your keys, saves, settings and `nx2_switches.txt` are kept. **Help > Roll Back to the Previous Version** undoes an update. No game running? **Help > Check for Updates** does the same.
+
+**From v4 or older:** this is the last manual update. Extract the new version into a new folder and copy your old `user` folder over it (keys, firmware, saves). The first minutes stutter while shaders rebuild for the new version. Then select the new `lichii.exe` in the launcher's Setup tab. From v4.1 on, Lichii updates itself.
 
 ## Launcher setup
 
@@ -189,9 +212,12 @@ Branch [`dusk-v4`](https://github.com/Mr-Tb/lichii-dusk/tree/dusk-v4) (v3: [`dus
 
 ## Credits and license
 
-Built on [zortos293/Lichii](https://github.com/zortos293/Lichii), [Frizti/Lichii](https://github.com/Frizti/Lichii). The launcher and network-test servers are [playDB-CNT](https://github.com/sikoGD/playDB-CNT) by sikoGD. Licensed under GPL-3.0-or-later (see [LICENSE.txt](LICENSE.txt)). NVIDIA DLSS runs through NVIDIA Streamline (MIT license); NVIDIA's files are downloaded by the user, not shipped.
+Built on [zortos293/Lichii](https://github.com/zortos293/Lichii), [Frizti/Lichii](https://github.com/Frizti/Lichii). Licensed under GPL-3.0-or-later (see [LICENSE.txt](LICENSE.txt)). NVIDIA DLSS runs through NVIDIA Streamline (MIT license); NVIDIA's files are downloaded by the user, not shipped.
 
-v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-waited-write-back cap, the run summary and the Force maximum clocks guard) and from an open upstream pull request, [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (report reads that wait only for their own reports). Thanks to JalenJaceX2 for PR #2. Thanks to [Nameless-p1q8](https://github.com/Nameless-p1q8) (Discord: p1q8) for the v4.1 AMD fix.
+**v4.2 exists thanks to two community builds that showed how much speed was left:**
+
+- **[NKrN2](https://github.com/NKrN2)**: the Round 7 performance build. It proved the no-wait, frame-ahead setup on our own RTX 3060 (matches 31–42 → 49–59 fps) and pinned down where the texture blinking comes from.
+- **[Nameless-p1q8](https://github.com/Nameless-p1q8)** (Discord: p1q8): the AMD build that found the per-submit wait was the bottleneck (RX 9070 XT ~40 → ~90 fps), and the v4.1 AMD match-crash fix.
 
 </details>
 
@@ -202,7 +228,7 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 <div dir="rtl">
 
 **هذا المشروع نسخة معدّلة (fork) من [zortos293/Lichii](https://github.com/zortos293/Lichii) (nx2، أحدث نسخة بعد الإصدار 341)، ومحسّنة لتشغيل *The Duskbloods Network Test* (رقم البرنامج `0400D1D02399A000`) على أجهزة Windows.**
-يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) من sikoGD، والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل يُحمَّل بشكل منفصل: انظر المربّعين بالأسفل.
+يعمل مع المشغّل [playDB-CNT](https://github.com/sikoGD/playDB-CNT) والذي يوفّر خوادم الشبكة المحلية التي تحتاجها اللعبة للدخول. المشغّل يُحمَّل بشكل منفصل: انظر المربّعين بالأسفل.
 
 > المشروع غير تابع لـ Nintendo أو FromSoftware أو المشاريع الأصلية. لا يتضمن أي ألعاب أو مفاتيح أو firmware. استخدم فقط ملفات استخرجتها بنفسك بطريقة قانونية.
 
@@ -224,7 +250,19 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 - **مباريات أسرع وأنعم:** كانت اللعبة تنتظر المحاكي بعد كل واحد من حوالي 24 إرسالًا لكرت الشاشة في كل إطار. الآن تنتظر فقط عندما يتأخر المحاكي أكثر من 8 إرسالات، فيبقى كرت الشاشة مشغولًا وتعود اللعبة لتجهيز الإطار التالي مسبقًا. على RTX 3060 بدقة 1.5x صار الانتظار 6 ميلي ثانية بدل 13 في كل إطار، والكروت الأسرع التي كان يعطّلها هذا الانتظار تستفيد أكثر.
 - **حمل أقل:** أدوات التشخيص (تتبّع التقطيع وقياس زمن كل مرحلة على كرت الشاشة) صارت مطفأة افتراضيًا.
 - **إصلاحات من المشروع الأصلي:** حدّ 512 ميغابايت لذاكرة جدول الرسوميات في اللعبة، وعدم ضياع كتابات المعالج التي تتزامن مع تتبّع الصفحات، وإصلاح قراءة الضباب والسطوع، والإبقاء على الصور المحذوفة حتى ينتهي منها كرت الشاشة، ومنع معرّفات الـ shaders غير الصالحة من الوصول إلى التعريف، وإصلاح تقريب في الـ JIT من Fritchii.
-- **على الإصدار 4.1 يعرض Lichii الإصدار 4.2 بنفسه** (Help > Check for Updates).
+- **على الإصدار 4.1 يعرض Lichii الإصدار 4.2 بنفسه:** راجع قسم التحديث عبر المشغّل في التثبيت.
+
+## اضبط الإصدار 4.2 حسب كرت شاشتك: `EDEN_NX2_SYNC_SUBMIT_LAG`
+
+الرقم هو المسافة التي يُسمح للعبة أن تسبق بها المحاكي. **رقم أعلى = إطارات أكثر على الكروت القوية، لكن قد تختفي الصور وتظهر. رقم أقل = بلا وميض، وأبطأ قليلًا.**
+
+| كرت الشاشة | القيمة | السبب |
+|---|---|---|
+| اللابتوبات والكروت المبتدئة (GTX 1650/1660، RTX 2060/3050، RX 6500–6600، Arc A380–A580) | **4** | كرت الشاشة هو الحدّ أصلًا: نفس الإطارات وبلا وميض |
+| الفئة المتوسطة (RTX 3060–4060 Ti، RX 6700–7700، Arc A750/A770/B580) | **8** (الافتراضي) | جُرّب على RTX 3060: تبقى اللعبة متقدمة بإطار، والوميض بالكاد يُلاحظ |
+| الفئة العالية (RTX 4070 وأعلى، RX 7800 XT وأعلى، RX 9070) | **12**، أو `EDEN_NX2_SYNC_SUBMIT=0` لأقصى إطارات | هذا الانتظار كان ما يحدّ من هذه الكروت. ظهر وميض؟ ارجع إلى 8 |
+
+**طريقة التغيير:** افتح الملف `nx2_switches.txt` (بجانب `lichii.exe`) بـ Notepad، وأضف السطر `EDEN_NX2_SYNC_SUBMIT_LAG=4` (أو 12)، واحفظ، ثم شغّل اللعبة من جديد. احذف السطر للرجوع إلى 8.
 
 ## الجديد في الإصدار 4.1
 
@@ -307,7 +345,18 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 4. **المشغّل:** [حمّل `Play.Duskbloods.exe`](https://github.com/sikoGD/playDB-CNT/releases/latest) وضعه بجانب `lichii.exe`، ثم جهّزه كما في قسم [إعداد المشغّل](#إعداد-المشغّل) بالأسفل.
 5. **اللعب:** اضغط **Start game** في `Play.Duskbloods.exe`. شغّل اللعبة دائمًا من المشغّل، فإذا شغّلتها بأي طريقة أخرى لن تجد أي خوادم، وستتوقف عند رسالة تطلب الاتصال بالإنترنت.
 
-**التحديث من الإصدار 4.1:** يعرض Lichii الإصدار الجديد بنفسه. **من الإصدار الرابع أو الأقدم:** هذا آخر تحديث يدوي. فكّ ضغط الإصدار الجديد في مجلد جديد، ثم انسخ مجلد `user` القديم فوقه (المفاتيح والـ firmware وملفات الحفظ). في الدقائق الأولى قد يحدث تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد. بعدها اختر `lichii.exe` الجديد في تبويب Setup في المشغّل. من الإصدار 4.1 فصاعدًا يحدّث Lichii نفسه.
+### التحديث عبر المشغّل
+
+من الإصدار 4.1 فصاعدًا يحدّث Lichii نفسه:
+1. شغّل اللعبة بزر **Start game** في `Play.Duskbloods.exe` كالمعتاد.
+2. يبحث Lichii عن التحديثات بنفسه. أثناء اللعب يظهر في شريط الحالة **"vX is available — press Stop to install"**.
+3. عندما تنتهي من اللعب، اختر **Emulation > Stop** (لا تغلق النافذة بزر X، وإلا ينتظر العرض للمرة القادمة).
+4. اضغط **Install**. يحدّث Lichii نفسه، ثم يُغلق ويطلب منك التشغيل من جديد.
+5. اضغط **Start game** في المشغّل مرة أخرى.
+
+المفاتيح وملفات الحفظ والإعدادات والملف `nx2_switches.txt` تبقى كما هي. خيار **Help > Roll Back to the Previous Version** يلغي التحديث. إذا لم تكن هناك لعبة تعمل، فخيار **Help > Check for Updates** يقوم بنفس الشيء.
+
+**من الإصدار الرابع أو الأقدم:** هذا آخر تحديث يدوي. فكّ ضغط الإصدار الجديد في مجلد جديد، ثم انسخ مجلد `user` القديم فوقه (المفاتيح والـ firmware وملفات الحفظ). في الدقائق الأولى قد يحدث تقطيع أثناء إعادة بناء الـ shaders للإصدار الجديد. بعدها اختر `lichii.exe` الجديد في تبويب Setup في المشغّل. من الإصدار 4.1 فصاعدًا يحدّث Lichii نفسه.
 
 ## إعداد المشغّل
 
@@ -383,9 +432,12 @@ v4 also uses ideas from [Fritchii](https://github.com/Frizti/Fritchii) (the one-
 
 ## الشكر والترخيص
 
-مبني على [zortos293/Lichii](https://github.com/zortos293/Lichii) و[Frizti/Lichii](https://github.com/Frizti/Lichii). المشغّل وخوادم الشبكة من [playDB-CNT](https://github.com/sikoGD/playDB-CNT) لـ sikoGD. الترخيص: GPL-3.0-or-later (راجع [LICENSE.txt](LICENSE.txt)). يعمل NVIDIA DLSS عبر NVIDIA Streamline (ترخيص MIT)، وملفات NVIDIA يحمّلها المستخدم بنفسه ولا تُوزَّع مع المحاكي.
+مبني على [zortos293/Lichii](https://github.com/zortos293/Lichii) و[Frizti/Lichii](https://github.com/Frizti/Lichii). الترخيص: GPL-3.0-or-later (راجع [LICENSE.txt](LICENSE.txt)). يعمل NVIDIA DLSS عبر NVIDIA Streamline (ترخيص MIT)، وملفات NVIDIA يحمّلها المستخدم بنفسه ولا تُوزَّع مع المحاكي.
 
-يستخدم الإصدار الرابع أيضًا أفكارًا من [Fritchii](https://github.com/Frizti/Fritchii) (حدّ إعادة الكتابة مع الانتظار، وملخّص الجلسة، وحماية خيار Force maximum clocks)، ومن طلب دمج مفتوح في المشروع الأصلي، [zortos293/Lichii#559](https://github.com/zortos293/Lichii/pull/559) (قراءة نتائج الاستعلامات مع انتظار نتائجها فقط). شكرًا لـ JalenJaceX2 على طلب الدمج رقم 2. وشكرًا لـ [Nameless-p1q8](https://github.com/Nameless-p1q8) (على Discord: ‏p1q8) على إصلاح AMD في الإصدار 4.1.
+**الإصدار 4.2 موجود بفضل نسختين من المجتمع أظهرتا كم من السرعة كان متبقيًا:**
+
+- **[NKrN2](https://github.com/NKrN2)**: نسخة الأداء Round 7. أثبتت فائدة إلغاء الانتظار مع تقدّم اللعبة بإطار على RTX 3060 الخاص بنا (المباريات من 31–42 إلى 49–59 إطار/ثانية)، وحدّدت مصدر وميض الصور.
+- **[Nameless-p1q8](https://github.com/Nameless-p1q8)** (على Discord: ‏p1q8): نسخة AMD التي اكتشفت أن الانتظار بعد كل إرسال هو عنق الزجاجة (RX 9070 XT من حوالي 40 إلى حوالي 90 إطار/ثانية)، وإصلاح انهيار مباريات AMD في الإصدار 4.1.
 
 </div>
 
