@@ -81,13 +81,14 @@ static std::filesystem::path GetSwitchExeDirectory(const char* argv0) {
 
 // Built into lichii.exe, so an in-place update brings new defaults while the player's
 // nx2_switches.txt is kept: either nx2_switches.txt or the real environment overrides any of them
-// (NAME=0 turns one off). The values v4 shipped in nx2_switches.txt.
+// (NAME=0 turns one off). Diagnostics stay off by default: EDEN_NX2_STUTTER_TRACE=1 (per-frame
+// stall causes) and EDEN_NX2_PASS_TIMING=1 (per-pass GPU times) are turned on in nx2_switches.txt.
 constexpr std::pair<const char*, const char*> DuskBuiltinSwitches[] = {
     {"EDEN_NX2_SPLIT", "2"},
     {"EDEN_NX2_FENCE_BATCH", "1"},
     {"EDEN_NX2_FRAMES_AHEAD", "1"},
     {"EDEN_NX2_HOSTTIMING_PRIO", "0"},
-    {"EDEN_NX2_STUTTER_TRACE", "1"},
+    {"EDEN_NX2_PASS_TIMING", "0"},
 };
 
 static void LoadNx2Switches(const char* argv0) {
