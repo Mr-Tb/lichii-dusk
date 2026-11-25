@@ -32,7 +32,9 @@ Put `Play.Duskbloods.exe` in the same folder as `lichii.exe`, then follow [Launc
 - **Upstream fixes:** a 512 MiB cap on the game's graphics table buffer, CPU writes that raced the GPU's page tracking are no longer lost, the fog/brightness readback fix, retired textures kept until the GPU is done with them, invalid shader IDs no longer reach the driver, and a JIT rounding fix from Fritchii.
 - **On v4.1, Lichii offers v4.2 by itself:** see [Updating through the launcher](#updating-through-the-launcher).
 
-## Tune v4.2 for your GPU: `EDEN_NX2_SYNC_SUBMIT_LAG`
+## Tune v4.2 for your GPU: `EDEN_NX2_SYNC_SUBMIT_LAG` in `nx2_switches.txt`
+
+**Where:** it is a line in the file **`nx2_switches.txt`**, in your Lichii folder next to `lichii.exe` (the same folder as `Play.Duskbloods.exe`).
 
 The number is how far the game may run ahead of the emulator. **Higher = more fps on strong GPUs, but textures may blink on and off. Lower = no blinking, a little slower.**
 
@@ -252,7 +254,9 @@ Built on [zortos293/Lichii](https://github.com/zortos293/Lichii), [Frizti/Lichii
 - **إصلاحات من المشروع الأصلي:** حدّ 512 ميغابايت لذاكرة جدول الرسوميات في اللعبة، وعدم ضياع كتابات المعالج التي تتزامن مع تتبّع الصفحات، وإصلاح قراءة الضباب والسطوع، والإبقاء على الصور المحذوفة حتى ينتهي منها كرت الشاشة، ومنع معرّفات الـ shaders غير الصالحة من الوصول إلى التعريف، وإصلاح تقريب في الـ JIT من Fritchii.
 - **على الإصدار 4.1 يعرض Lichii الإصدار 4.2 بنفسه:** راجع قسم التحديث عبر المشغّل في التثبيت.
 
-## اضبط الإصدار 4.2 حسب كرت شاشتك: `EDEN_NX2_SYNC_SUBMIT_LAG`
+## اضبط الإصدار 4.2 حسب كرت شاشتك: `EDEN_NX2_SYNC_SUBMIT_LAG` في `nx2_switches.txt`
+
+**أين:** هو سطر في الملف **`nx2_switches.txt`** داخل مجلد Lichii بجانب `lichii.exe` (نفس مجلد `Play.Duskbloods.exe`).
 
 الرقم هو المسافة التي يُسمح للعبة أن تسبق بها المحاكي. **رقم أعلى = إطارات أكثر على الكروت القوية، لكن قد تختفي الصور وتظهر. رقم أقل = بلا وميض، وأبطأ قليلًا.**
 
