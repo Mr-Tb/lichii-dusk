@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <deque>
 #include <map>
 #include <memory>
 #include <vector>
@@ -220,6 +221,8 @@ private:
     ::Common::unordered_map<DeviceFD, NvCore::SessionId> sessions;
     u32 channel_syncpoint;
     std::mutex channel_mutex;
+    // Fences of submits not yet waited for (EDEN_NX2_SYNC_SUBMIT_LAG), under channel_mutex.
+    std::deque<NvFence> sync_lag_fences;
 
     // Events
     Kernel::KEvent* sm_exception_breakpoint_int_report_event;

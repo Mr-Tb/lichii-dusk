@@ -535,7 +535,23 @@ NvResult nvhost_gpu::SubmitGPFIFOImpl(IoctlSubmitGpfifo& params, Tegra::CommandL
     // The debug server's perf_flip sync_submit overrides it per submit (each waits alone).
     const bool sync_submit =
         VideoCommon::Nx2Perf::LiveOr(VideoCommon::Nx2Perf::g_sync_submit, sync_submit_switch);
-    if (g_nx2_driver && sync_submit && increment > 0) {
+    // EDEN_NX2_SYNC_SUBMIT_LAG=N: wait for the fence of the submit N back instead of this one, so
+    // the GPU thread records submit K while the game builds K+1 (unset or 0 = this submit).
+    static const size_t sync_lag = [] {
+        const char* value = std::getenv("EDEN_NX2_SYNC_SUBMIT_LAG");
+        return value == nullptr ? size_t{0} : static_cast<size_t>(std::strtoul(value, nullptr, 10));
+    }();
+    bool sync_wait = g_nx2_driver && sync_submit && increment > 0;
+    NvFence wait_fence = params.fence;
+    if (sync_wait && sync_lag > 0) {
+        sync_lag_fences.push_back(params.fence);
+        sync_wait = sync_lag_fences.size() > sync_lag;
+        if (sync_wait) {
+            wait_fence = sync_lag_fences.front();
+            sync_lag_fences.pop_front();
+        }
+    }
+    if (sync_wait) {
         lock.unlock();
         const auto wait_begin = std::chrono::steady_clock::now();
         SCOPE_EXIT {
@@ -547,14 +563,14 @@ NvResult nvhost_gpu::SubmitGPFIFOImpl(IoctlSubmitGpfifo& params, Tegra::CommandL
             VideoCommon::Nx2Perf::g_sync_submit_waits.fetch_add(1, std::memory_order_relaxed);
         };
         auto& syncpoints = system.Host1x().GetSyncpointManager();
-        if (!syncpoints.IsReadyGuest(params.fence.id, params.fence.value)) {
+        if (!syncpoints.IsReadyGuest(wait_fence.id, wait_fence.value)) {
             struct Wake {
                 std::mutex mutex;
                 std::condition_variable cv;
                 bool done{};
             };
             auto wake = std::make_shared<Wake>();
-            syncpoints.RegisterGuestAction(params.fence.id, params.fence.value, [wake] {
+            syncpoints.RegisterGuestAction(wait_fence.id, wait_fence.value, [wake] {
                 {
                     std::scoped_lock lk{wake->mutex};
                     wake->done = true;
@@ -575,12 +591,12 @@ NvResult nvhost_gpu::SubmitGPFIFOImpl(IoctlSubmitGpfifo& params, Tegra::CommandL
             }
         }
         static std::atomic<u32> timeouts{};
-        if (!syncpoints.IsReadyGuest(params.fence.id, params.fence.value) &&
+        if (!syncpoints.IsReadyGuest(wait_fence.id, wait_fence.value) &&
             (timeouts.fetch_add(1, std::memory_order_relaxed) % 64) == 0) {
             LOG_WARNING(Service_NVDRV,
                         "nx2 sync submit timed out waiting for fence ({}, {}), current value={}",
-                        params.fence.id, params.fence.value,
-                        syncpoints.GetGuestSyncpointValue(params.fence.id));
+                        wait_fence.id, wait_fence.value,
+                        syncpoints.GetGuestSyncpointValue(wait_fence.id));
         }
     }
 
